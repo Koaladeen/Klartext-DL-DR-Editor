@@ -962,6 +962,13 @@ function drawAxisGizmo(W, H){
 }
 function drawToolpath(idx){
   if(document.getElementById("pathPanel").classList.contains("hide")) return;
+  if(idx !== lastPathIdx){
+    // a different tool call than what's currently shown — snap back to the default isometric
+    // view and re-fit/re-center on it, rather than keeping whatever orbit/pan/zoom was left over
+    // from looking at the previous one. Redraws of the SAME call (resize, 2D/3D toggle, panel
+    // resize) leave the camera exactly where the user put it.
+    pathAz = -Math.PI / 4; pathEl = Math.PI / 6; pathZoom = 1; pathPanX = 0; pathPanY = 0;
+  }
   lastPathIdx = idx;
   const grp = toolGroups.find(g => g.calls.includes(idx));
   document.getElementById("pathTitle").textContent = "Toolpath — " + (grp ? grp.label : "TOOL CALL");
