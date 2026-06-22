@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Klartext DL/DR Editor</title>
+<style>
+  /* ---- design tokens : light (default) derived from the TNC operator panel ---- */
+  :root{
+    --bg:#e9edf1; --panel:#ffffff; --panel2:#eaeef2; --raised:#e2e7ec; --raised-h:#d4dbe2;
+    --line:#ccd4dc; --line2:#bcc6cf; --line-h:#9fadb8;
+    --txt:#1b242c; --muted:#566470; --faint:#8a97a2;
+    --blue:#1d5fd6; --blue-dim:#d3e3ff;
+    --green:#2c7a39; --cyan:#0e7d91; --amber:#b06f12; --amber-dim:#e6d3a8; --red:#c0392b;
+    --header1:#f3f6f9; --header2:#e7ecf1;
+    --accent-bg:#d8e7ff; --accent-fg:#15407f; --accent-bg-h:#c4d9fb;
+    --badge-bg:#fbf2da;
+    --sel-fg:#0d1b33; --sel-ln:#1d5fd6;
+    --cool-fg:#0c4a63; --cool-bg:#d6eefb; --cool-bd:#9fcbe2;
+    --rapid:#c9a000;
+    --sec-line:#e2e7ec; --ln-line:#dfe5ea; --prog-bg:#f4f7fa;
+    --overlay:#dfe6edcc; --scroll:#c3ccd5; --scroll-h:#a9b4be;
+    --mono:"JetBrains Mono","SFMono-Regular","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
+  }
+  [data-theme="dark"]{
+    --bg:#13171b; --panel:#1a2026; --panel2:#212a31; --raised:#27323b; --raised-h:#34444f;
+    --line:#2f3b45; --line2:#3a4a56; --line-h:#46596a;
+    --txt:#cdd7df; --muted:#7f8d99; --faint:#5a6772;
+    --blue:#3f7bf0; --blue-dim:#1d3a78;
+    --green:#7cc063; --cyan:#4cc2d4; --amber:#e2a93f; --amber-dim:#4a3a16; --red:#d96b63;
+    --header1:#1d242b; --header2:#171d22;
+    --accent-bg:#1b2d52; --accent-fg:#cfe0ff; --accent-bg-h:#22386a;
+    --badge-bg:#22200f;
+    --sel-fg:#eaf1ff; --sel-ln:#9fc0ff;
+    --cool-fg:#bfe6ff; --cool-bg:#10303f; --cool-bd:#1d5b80;
+    --rapid:#ffd83d;
+    --sec-line:#232c34; --ln-line:#1f272e; --prog-bg:#10141833;
+    --overlay:#0c0f12cc; --scroll:#2c3742; --scroll-h:#3a4956;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font-family:var(--mono); font-size:13px; line-height:1.45;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  /* ---- top bar ---- */
+  header{
+    flex:0 0 auto; display:flex; align-items:center; gap:14px;
+    padding:9px 14px; background:linear-gradient(var(--header1),var(--header2));
+    border-bottom:1px solid var(--line); user-select:none;
+  }
+  .brand{display:flex; align-items:baseline; gap:9px; white-space:nowrap}
+  .brand b{color:var(--amber); letter-spacing:.14em; font-weight:600; font-size:12px}
+  .brand span{color:var(--faint); font-size:11px; letter-spacing:.08em}
+  .file{
+    flex:1 1 auto; min-width:0; color:var(--muted); font-size:12px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .file b{color:var(--txt); font-weight:500}
+  .badge{
+    color:var(--amber); border:1px solid var(--amber-dim); background:var(--badge-bg);
+    padding:1px 8px; border-radius:10px; font-size:11px; white-space:nowrap;
+  }
+  .badge.zero{color:var(--faint); border-color:var(--line); background:transparent}
+  button.btn{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.05em;
+    color:var(--txt); background:var(--raised); border:1px solid var(--line2);
+    padding:6px 11px; border-radius:5px; cursor:pointer; white-space:nowrap;
+  }
+  button.btn:hover{background:var(--raised-h); border-color:var(--line-h)}
+  button.btn:active{transform:translateY(1px)}
+  button.btn.accent{border-color:var(--blue); color:var(--accent-fg); background:var(--accent-bg)}
+  button.btn.accent:hover{background:var(--accent-bg-h)}
+  button.btn.danger:hover{border-color:var(--red); color:var(--red)}
+  button.btn:disabled{opacity:.4; cursor:default; transform:none; background:var(--raised)}
+  /* ---- main grid ---- */
+  main{flex:1 1 auto; display:grid; grid-template-columns:280px minmax(0,1fr) minmax(0,1.05fr); min-height:0}
+  .col{display:flex; flex-direction:column; min-height:0; min-width:0}
+  .col + .col{border-left:1px solid var(--line)}
+  .col-head{
+    flex:0 0 auto; padding:8px 12px; background:var(--panel2);
+    border-bottom:1px solid var(--line);
+    font-size:10.5px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .col-head .count{color:var(--faint); letter-spacing:.05em}
+  /* ---- structure legend (left) ---- */
+  .filter{flex:0 0 auto; padding:8px; border-bottom:1px solid var(--line); background:var(--panel)}
+  .filter input{
+    width:100%; font-family:var(--mono); font-size:12px; color:var(--txt);
+    background:var(--bg); border:1px solid var(--line2); border-radius:4px; padding:6px 8px;
+  }
+  .filter input:focus{outline:none; border-color:var(--blue)}
+  #legend{flex:1 1 auto; overflow:auto}
+  .sec{
+    padding:8px 12px; border-bottom:1px solid var(--sec-line); cursor:pointer;
+    display:flex; align-items:flex-start; gap:8px;
+  }
+  .sec:hover{background:var(--panel2)}
+  .sec.active{background:var(--blue-dim); box-shadow:inset 3px 0 0 var(--blue)}
+  .sec .tick{color:var(--green); flex:0 0 auto; margin-top:1px}
+  .sec .body{flex:1 1 auto; min-width:0}
+  .sec .label{color:var(--green); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .sec.active .label{color:var(--sel-fg)}
+  .sec .meta{color:var(--faint); font-size:10.5px; margin-top:2px; display:flex; gap:10px}
+  .sec .dot{color:var(--amber)}
+  /* ---- editor cards (center) ---- */
+  #editor{flex:1 1 auto; overflow:auto; padding:12px}
+  .cfgbar{display:flex; gap:18px; align-items:center; padding:7px 12px; background:var(--panel);
+          border-bottom:1px solid var(--line); font-size:11px; color:var(--muted)}
+  .cfgbar label{display:flex; gap:6px; align-items:center; letter-spacing:.03em}
+  .cfgbar input{font-family:var(--mono); font-size:11px; color:var(--txt); background:var(--bg);
+                border:1px solid var(--line2); border-radius:4px; padding:3px 6px}
+  .cfgbar input:focus{outline:none; border-color:var(--blue)}
+  #coolWatch{width:100px} #coolWin{width:46px; text-align:center} #nameWin{width:46px; text-align:center}
+  .chip{font-size:10.5px; border-radius:3px; padding:1px 6px; letter-spacing:.03em; white-space:nowrap}
+  .chip.cool-on{color:var(--cool-fg); background:var(--cool-bg); border:1px solid var(--cool-bd)}
+  .chip.cool-none{color:var(--faint); border:1px solid var(--line); background:transparent}
+  .empty{color:var(--faint); padding:32px 16px; text-align:center; font-size:12px}
+  .empty kbd{color:var(--muted); border:1px solid var(--line2); border-radius:3px; padding:1px 5px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:7px; overflow:hidden; cursor:pointer; margin-bottom:10px}
+  .card.modified{border-color:var(--amber-dim)}
+  .card.sel{box-shadow:0 0 0 2px var(--blue)}
+  @keyframes cardflash{from{background:var(--blue-dim)} to{background:var(--panel)}}
+  .card.flash{animation:cardflash .55s ease-out}
+  .card.recall{border-left:2px solid var(--cyan)}
+  .recall-tag{color:var(--cyan); font-size:11px; border:1px solid var(--line2); border-radius:3px; padding:0 6px}
+  .near-line{color:var(--green); font-weight:600}
+  .card-head{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px;
+    background:var(--panel2); border-bottom:1px solid var(--line);
+  }
+  .kw{color:var(--cyan); font-weight:600}
+  .ref{color:var(--txt)}
+  .ref.name{color:var(--green)}
+  .fields{display:flex; flex-wrap:wrap; gap:14px; padding:12px}
+  .field{display:flex; flex-direction:column; gap:5px}
+  .field > label{font-size:10px; letter-spacing:.1em; color:var(--muted); text-transform:uppercase}
+  .field .help{font-size:9.5px; color:var(--faint); letter-spacing:0; text-transform:none}
+  .stepper{display:flex; align-items:stretch; border:1px solid var(--line2); border-radius:5px; overflow:hidden; background:var(--bg)}
+  .stepper.set{border-color:var(--amber)}
+  .stepper button{
+    width:26px; border:none; background:var(--raised); color:var(--txt);
+    cursor:pointer; font-family:var(--mono); font-size:14px;
+  }
+  .stepper button:hover{background:var(--raised-h)}
+  .stepper input{
+    width:78px; text-align:center; font-family:var(--mono); font-size:13px;
+    color:var(--txt); background:transparent; border:none; padding:6px 4px;
+    border-left:1px solid var(--line2); border-right:1px solid var(--line2);
+  }
+  .stepper.set input{color:var(--amber)}
+  .stepper input:focus{outline:none}
+  .stepper .unit{display:flex; align-items:center; padding:0 7px; color:var(--faint); font-size:10px}
+  .field .was{font-size:10px; color:var(--faint); height:12px}
+  .field .was b{color:var(--amber)}
+  /* ---- program view (right) ---- */
+  #progWrap{flex:1 1 auto; overflow:auto; position:relative; background:var(--prog-bg)}
+  #progSpacer{position:relative; width:100%}
+  #progSlice{position:absolute; left:0; right:0; top:0}
+  .pl{display:flex; white-space:pre; padding:0 10px 0 0; height:20px; align-items:center}
+  .pl .ln{flex:0 0 56px; text-align:right; padding-right:12px; color:var(--faint); user-select:none;
+          border-right:1px solid var(--ln-line); margin-right:10px}
+  .pl .src{flex:1 1 auto; overflow:hidden; text-overflow:ellipsis}
+  .pl.active{background:var(--blue-dim); box-shadow:inset 3px 0 0 var(--blue)}
+  .pl.active .ln{color:var(--sel-ln)}
+  .pl.mod{box-shadow:inset 3px 0 0 var(--amber)}
+  .pl.active.mod{box-shadow:inset 3px 0 0 var(--blue), inset 6px 0 0 var(--amber)}
+  .t-cmt{color:var(--green); opacity:.8}
+  .t-struct{color:var(--green); font-weight:600}
+  .t-kw{color:var(--cyan)}
+  .t-delta{color:var(--amber)}
+  .drop{position:fixed; inset:0; background:var(--overlay); display:none; align-items:center; justify-content:center;
+        z-index:30; pointer-events:none}
+  .drop.show{display:flex}
+  .drop div{border:2px dashed var(--blue); border-radius:12px; padding:48px 64px; color:var(--blue); letter-spacing:.1em}
+  /* ---- save modal ---- */
+  .modal-overlay{position:fixed; inset:0; background:var(--overlay); display:none;
+                  align-items:center; justify-content:center; z-index:40}
+  .modal-overlay.show{display:flex}
+  .modal{width:min(640px,92vw); max-height:82vh; display:flex; flex-direction:column;
+         background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden;
+         box-shadow:0 16px 48px rgba(0,0,0,.35)}
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:11px 16px;
+              border-bottom:1px solid var(--line); background:var(--panel2)}
+  .modal-head h3{margin:0; font-size:12.5px; letter-spacing:.08em; color:var(--txt); font-weight:600; text-transform:uppercase}
+  .modal-x{background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; line-height:1; padding:2px}
+  .modal-x:hover{color:var(--txt)}
+  .modal-body{flex:1 1 auto; overflow:auto; padding:14px 16px}
+  .diff-row{margin-bottom:10px; border:1px solid var(--line); border-radius:6px; overflow:hidden}
+  .diff-ln{font-size:10.5px; letter-spacing:.05em; color:var(--faint); padding:5px 10px; background:var(--panel2); border-bottom:1px solid var(--line)}
+  .diff-old, .diff-new{padding:5px 10px; font-size:12px; white-space:pre; overflow-x:auto}
+  .diff-old{color:var(--red)}
+  .diff-new{color:var(--amber); border-top:1px dashed var(--line)}
+  .diff-empty{color:var(--faint); font-size:12px; padding:6px 2px}
+  .modal-foot{display:flex; align-items:center; gap:14px; padding:11px 16px;
+              border-top:1px solid var(--line); background:var(--panel2)}
+  .modal-fn-wrap{flex:1 1 auto; display:flex; flex-direction:column; gap:4px; min-width:0}
+  .link-note{font-size:10.5px; color:var(--green)}
+  .link-note.unlinked{color:var(--faint)}
+  .file .linked{color:var(--green); margin-left:6px; font-size:11px}
+  .modal-fn{display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted)}
+  .modal-fn input{flex:1 1 auto; font-family:var(--mono); font-size:12px; color:var(--txt);
+                   background:var(--bg); border:1px solid var(--line2); border-radius:4px; padding:6px 8px}
+  .modal-fn input:focus{outline:none; border-color:var(--blue)}
+  .modal-actions{display:flex; gap:8px; flex:0 0 auto}
+  /* ---- floating toolpath preview ---- */
+  .path-panel{
+    position:fixed; right:16px; bottom:16px; width:380px; height:400px; z-index:25;
+    min-width:240px; min-height:220px; max-width:90vw; max-height:85vh;
+    display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; overflow:hidden; box-shadow:0 12px 36px rgba(0,0,0,.3);
+  }
+  .path-panel.hide{display:none}
+  .path-resize{
+    position:absolute; left:0; top:0; width:16px; height:16px; z-index:30;
+    cursor:nwse-resize; touch-action:none;
+  }
+  .path-resize::before{
+    content:""; position:absolute; left:4px; top:4px; width:8px; height:8px;
+    border-left:2px solid var(--line-h); border-top:2px solid var(--line-h); border-radius:2px 0 0 0;
+  }
+  .path-resize:hover::before{ border-color:var(--blue) }
+  .path-head{
+    display:flex; align-items:center; gap:8px; padding:8px 12px;
+    background:var(--panel2); border-bottom:1px solid var(--line);
+    font-size:11.5px; letter-spacing:.05em; color:var(--txt); font-weight:600;
+  }
+  .path-head #pathTitle{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .path-view-toggle{display:flex; border:1px solid var(--line2); border-radius:5px; overflow:hidden; flex:0 0 auto}
+  .path-view-toggle button{
+    font-family:var(--mono); font-size:10px; letter-spacing:.04em; padding:3px 8px; border:none;
+    background:var(--raised); color:var(--muted); cursor:pointer;
+  }
+  .path-view-toggle button.active{background:var(--accent-bg); color:var(--accent-fg)}
+  .path-body{flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:6px; overflow:hidden; touch-action:none; cursor:grab}
+  .path-body.dragging{cursor:grabbing; user-select:none}
+  .path-body svg{width:100%; height:100%; display:block}
+  .path-body .empty{color:var(--faint); font-size:11.5px; text-align:center; padding:0 16px}
+  .path-foot{
+    flex:0 0 auto; padding:6px 12px 9px; font-size:10.5px; color:var(--muted);
+    display:flex; justify-content:space-between; gap:8px; border-top:1px solid var(--line); flex-wrap:wrap;
+  }
+  .path-foot .legend-line{display:flex; align-items:center; gap:5px}
+  .path-foot .swatch{width:14px; height:2px; display:inline-block}
+  @media (max-width:900px){ .path-panel{left:16px; right:16px; width:auto} }
+  /* scrollbars */
+  ::-webkit-scrollbar{width:10px; height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--scroll); border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--scroll-h)}
+  ::-webkit-scrollbar-track{background:transparent}
+  @media (max-width:900px){ main{grid-template-columns:1fr} .col + .col{border-left:none; border-top:1px solid var(--line)} }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>KLARTEXT · DL/DR</b><span>tool-call offset editor</span></div>
+  <div class="file" id="fileLabel">No program loaded — open a .H file or drop one anywhere</div>
+  <div class="badge zero" id="editBadge">0 edits</div>
+  <button class="btn" id="themeBtn">☾ Dark</button>
+  <button class="btn accent" id="pathBtn">🧭 Toolpath</button>
+  <button class="btn" id="folderBtn" title="Set a default folder for Open/Save dialogs">📁 Default folder…</button>
+  <button class="btn" id="openBtn">Open .H</button>
+  <button class="btn danger" id="resetBtn" disabled>Reset</button>
+  <button class="btn" id="copyBtn" disabled>Copy</button>
+  <button class="btn accent" id="exportBtn" disabled>Save…</button>
+  <input type="file" id="fileInput" accept=".h,.H,.txt" hidden>
+</header>
+
+<main>
+  <section class="col">
+    <div class="col-head"><span>Structure</span><span class="count" id="secCount"></span></div>
+    <div class="filter"><input id="filterInput" placeholder="filter tool calls…" spellcheck="false"></div>
+    <div id="legend"><div class="empty">No file open yet.</div></div>
+  </section>
+
+  <section class="col">
+    <div class="col-head"><span>Tool calls</span><span class="count" id="callCount"></span></div>
+    <div class="cfgbar">
+      <label>Name lookup <input id="nameWin" type="number" min="0" max="30" value="5"> lines ↑</label>
+      <label>Coolant M-codes <input id="coolWatch" value="8, 28, 26" spellcheck="false"></label>
+      <label>scan <input id="coolWin" type="number" min="1" max="50" value="20"> lines ↓</label>
+    </div>
+    <div id="editor"><div class="empty">Open a .H file (or drop one anywhere) to get started.</div></div>
+  </section>
+
+  <section class="col">
+    <div class="col-head"><span>Program</span><span class="count" id="lineCount"></span></div>
+    <div id="progWrap"><div id="progSpacer"><div id="progSlice"></div></div></div>
+  </section>
+</main>
+
+<div class="drop" id="drop"><div>Drop .H program</div></div>
+
+<div class="path-panel mode-3d" id="pathPanel">
+  <div class="path-resize" id="pathResize" title="Drag to resize"></div>
+  <div class="path-head">
+    <span id="pathTitle">Toolpath</span>
+    <div class="path-view-toggle">
+      <button id="path2dBtn">2D</button>
+      <button id="path3dBtn" class="active">3D</button>
+    </div>
+    <button class="modal-x" id="pathClose" title="Hide panel">✕</button>
+  </div>
+  <div class="path-body" id="pathBody" title="Drag to rotate · Shift+drag to pan · Scroll to zoom · Double-click to reset"></div>
+  <div class="path-foot" id="pathFoot"></div>
+</div>
+
+<div class="modal-overlay" id="saveOverlay">
+  <div class="modal">
+    <div class="modal-head"><h3>Save changes</h3><button class="modal-x" id="saveModalClose">✕</button></div>
+    <div class="modal-body" id="saveDiffBody"></div>
+    <div class="modal-foot">
+      <div class="modal-fn-wrap">
+        <div class="link-note" id="linkNote"></div>
+        <label class="modal-fn">File name <input id="saveFileName" spellcheck="false"></label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="saveCancelBtn">Cancel</button>
+        <button class="btn" id="saveInPlaceBtn">Save</button>
+        <button class="btn accent" id="saveAsBtn">Save As…</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   Klartext DL/DR editor — parse a Heidenhain .H program, navigate by the
+   structure (*) blocks that feed the control's Gliederung pane, and edit the
+   DL / DR / DR2 deltas in each TOOL CALL without touching the rest of the line.
+   ========================================================================= */
+
+// ---- block grammar -------------------------------------------------------
+const RE_STRUCT   = /^(\s*)(\d+)\s+\*\s?(.*)$/;            // structure block -> legend entry
+const RE_TOOLCALL = /^(\s*)(\d+)\s+(TOOL CALL)\b(.*)$/;    // tool call block
+const RE_COMMENT  = /;\s?(.*)$/;                           // trailing ; comment
+// value-only capture (keep keyword + spacing on replace); DR excludes DR2
+const RE_V = { DL:/(\bDL\s*)([+-]?\d+(?:\.\d+)?)/, DR:/(\bDR(?!2)\s*)([+-]?\d+(?:\.\d+)?)/, DR2:/(\bDR2\s*)([+-]?\d+(?:\.\d+)?)/ };
+// whole-token capture (for removal); leading space swallowed so the line stays tidy
+const RE_F = { DL:/\s*\bDL\s*[+-]?\d+(?:\.\d+)?/, DR:/\s*\bDR(?!2)\s*[+-]?\d+(?:\.\d+)?/, DR2:/\s*\bDR2\s*[+-]?\d+(?:\.\d+)?/ };
+const KW_RE = /\b(TOOL CALL|TOOL DEF|CYCL DEF|CYCL CALL|CALL LBL|LBL|PLANE|FUNCTION|TCPM|BLK FORM|APPR|DEP|CC|RND|CHF|FN \d+)\b/g;
+// motion blocks, for the toolpath preview only — deliberately simple (no incremental
+// coordinates, no FK, no helix-aware tilt); good enough for a quick visual sanity check
+const RE_MOVE_L  = /^\s*\d+\s+L\s+(.*)$/;
+const RE_MOVE_CC = /^\s*\d+\s+CC\s+(.*)$/;
+const RE_MOVE_C  = /^\s*\d+\s+C\s+(.*)$/;   // requires whitespace right after "C", so "CC ..." never matches here
+const RE_MOVE_CP = /^\s*\d+\s+CP\b(.*)$/;   // polar circular move: IPA/PA + DR around the active CC, Z optional (helix)
+function axisVal(rest, letter){ const m = rest.match(new RegExp("\\b" + letter + "([+-]?\\d+(?:\\.\\d+)?)")); return m ? parseFloat(m[1]) : null; }
+// IPA / PA / DR pull double duty as both polar-move fields and (PA) plane-angle elsewhere, so these
+// are deliberately narrow: IPA matched first, and PA's \b won't fire inside "IPA" since I-P share no boundary.
+function polarVal(rest, key){ const m = rest.match(new RegExp("\\b" + key + "([+-]?\\d+(?:\\.\\d+)?)")); return m ? parseFloat(m[1]) : null; }
+
+// ---- state ---------------------------------------------------------------
+let lines = [];        // editable model (one string per source line)
+let original = [];     // pristine copy for reset / "was" chips
+let toolGroups = [];   // [{ id, label, ref, calls:[headerIdx, recallIdx, ...] }] — one per numbered TOOL CALL
+let nearStruct = {};   // lineIndex -> text of the * structure line immediately preceding that call
+let inherited = {};    // lineIndex -> { name }  for re-call blocks (active tool they belong to)
+let callLines = [];    // ascending list of every tool-call line index (for coolant window bounds)
+let COOLANT_WATCH = new Set([8,28,26]);   // M-codes treated as coolant/air, editable in the UI
+let COOLANT_WINDOW = 20;                   // how many lines after a call to scan
+let NAME_WINDOW = 5;                       // how many lines above a call the near-tag struct lookup allows
+let newline = "\n";
+let fileName = "program.H";
+let currentFileHandle = null;   // FileSystemFileHandle of the opened file, if the browser supports it —
+                                 // lets "Save" write straight back to where the file came from
+let defaultDirHandle = null;    // FileSystemDirectoryHandle remembered as the starting folder for
+                                 // Open/Save dialogs, persisted in IndexedDB across reloads
+const FS_ACCESS = typeof window.showOpenFilePicker === "function";
+
+// ---- tiny IndexedDB key/value store, just for remembering the default folder handle ----
+function idbOpen(){
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("klartext-dldr", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key){
+  try{
+    const db = await idbOpen();
+    return await new Promise(resolve => {
+      const tx = db.transaction("kv", "readonly").objectStore("kv").get(key);
+      tx.onsuccess = () => resolve(tx.result || null);
+      tx.onerror = () => resolve(null);
+    });
+  }catch(_){ return null; }
+}
+async function idbSet(key, val){
+  try{
+    const db = await idbOpen();
+    return await new Promise(resolve => {
+      const tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(val, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    });
+  }catch(_){ return false; }
+}
+let activeSection = null;
+let activeLine = -1;
+
+// ---- helpers -------------------------------------------------------------
+function fmt(v){
+  let n = Number(v);
+  if(!isFinite(n)) return null;
+  let s = (Math.round(n*1000)/1000).toString();
+  if(n >= 0 && !s.startsWith("+")) s = "+" + s;     // Heidenhain always carries an explicit sign
+  return s;
+}
+function parseCall(line){
+  const m = line.match(RE_TOOLCALL);
+  if(!m) return null;
+  const blk = m[2], rest = m[4];
+  // A tool ref is ONLY a leading integer (T-number) or a "quoted name".
+  // Anything else — DL.., DR.., an axis, S/F, or nothing — means this is a
+  // re-call of the currently active tool (used to change DL/DR mid-operation).
+  let ref = null;
+  const q = rest.match(/^\s*"([^"]*)"/);
+  const num = rest.match(/^\s*(\d+)\b/);
+  if(q)        ref = '"' + q[1] + '"';
+  else if(num) ref = num[1];
+  const cmt = (rest.match(RE_COMMENT) || [,""])[1];
+  const get = k => { const x = rest.match(RE_V[k]); return x ? x[2] : null; };
+  return { blk, ref, recall: ref === null, comment:cmt, DL:get("DL"), DR:get("DR"), DR2:get("DR2") };
+}
+function isQuoted(ref){ return ref && ref.startsWith('"'); }
+
+// Scan from a tool call forward (up to COOLANT_WINDOW lines, stopping at the next
+// tool call) for any watched coolant M-codes. Comments are ignored.
+function coolantFor(idx){
+  const { next } = neighborCalls(idx);
+  const end = Math.min(lines.length, idx + COOLANT_WINDOW + 1, next);
+  const found = [], seen = new Set();
+  for(let i = idx; i < end; i++){
+    const code = lines[i].split(";")[0];                  // drop trailing comment
+    const ms = code.match(/\bM(\d+)\b/g);
+    if(!ms) continue;
+    for(const tok of ms){
+      const n = Number(tok.slice(1));
+      if(COOLANT_WATCH.has(n) && !seen.has(n)){ seen.add(n); found.push({ code:n, line:i }); }
+    }
+  }
+  return found;
+}
+function coolLabel(n){ return ({7:"mist coolant",8:"flood coolant",9:"coolant off"})[n] || "M-function"; }
+function parseWatch(str){
+  const s = new Set();
+  (str.match(/\d+/g) || []).forEach(d => s.add(Number(d)));
+  return s;
+}
+
+// nearest tool-call lines on either side of idx, keeps the coolant scan from
+// bleeding into a neighboring operation
+function neighborCalls(idx){
+  let prev = -1, next = Infinity;
+  for(const cl of callLines){ if(cl < idx) prev = cl; else if(cl > idx){ next = cl; break; } }
+  return { prev, next };
+}
+
+// surgical edit of one delta on one line; "" clears the token
+function setField(idx, key, value){
+  let line = lines[idx];
+  if(value === "" || value == null){
+    line = line.replace(RE_F[key], "");
+  } else {
+    const tok = key + fmt(value);
+    if(RE_V[key].test(line)){
+      line = line.replace(RE_V[key], "$1" + fmt(value));   // replace value, keep keyword + spacing
+    } else {
+      const c = line.search(/\s*;/);                       // insert before a trailing comment if present
+      line = c >= 0 ? line.slice(0,c) + " " + tok + line.slice(c)
+                    : line.replace(/\s*$/,"") + " " + tok;
+    }
+  }
+  lines[idx] = line;
+}
+
+// ---- parsing -------------------------------------------------------------
+function parse(text){
+  newline = text.includes("\r\n") ? "\r\n" : "\n";
+  lines = text.split(/\r?\n/);
+  original = lines.slice();
+  buildGroups();
+  computeNearStruct();
+  buildMotionCache();
+}
+
+// One forward pass tracking modal X/Y/Z (and the active CC center) so the toolpath
+// preview can look up "position after line i" in O(1) instead of re-simulating the
+// whole file every time a card is clicked. motion[i] is null for non-motion lines.
+const RE_PLANE_SPATIAL = /^\s*\d+\s+PLANE\s+SPATIAL\b(.*)$/;
+const RE_PLANE_RESET   = /^\s*\d+\s+PLANE\s+RESET\b/;
+function planeAngle(rest, key){ const m = rest.match(new RegExp("\\b" + key + "([+-]?\\d+(?:\\.\\d+)?)")); return m ? parseFloat(m[1]) : 0; }
+// Tiny 3x3 rotation-matrix helpers — just enough to follow a PLANE SPATIAL tilt so a
+// helix (or anything else) programmed in a tilted working plane lands in the right
+// place in 3D instead of being plotted as if it were still flat in the base XY plane.
+const MAT_ID = [[1,0,0],[0,1,0],[0,0,1]];
+function matMul(A, B){
+  const R = [[0,0,0],[0,0,0],[0,0,0]];
+  for(let r = 0; r < 3; r++) for(let c = 0; c < 3; c++){ let s = 0; for(let k = 0; k < 3; k++) s += A[r][k]*B[k][c]; R[r][c] = s; }
+  return R;
+}
+function rotX(a){ const c=Math.cos(a), s=Math.sin(a); return [[1,0,0],[0,c,-s],[0,s,c]]; }
+function rotY(a){ const c=Math.cos(a), s=Math.sin(a); return [[c,0,s],[0,1,0],[-s,0,c]]; }
+function rotZ(a){ const c=Math.cos(a), s=Math.sin(a); return [[c,-s,0],[s,c,0],[0,0,1]]; }
+function applyMat(R, x, y, z){
+  return [ R[0][0]*x+R[0][1]*y+R[0][2]*z, R[1][0]*x+R[1][1]*y+R[1][2]*z, R[2][0]*x+R[2][1]*y+R[2][2]*z ];
+}
+let posAfter = [];
+let motion = [];
+function buildMotionCache(){
+  posAfter = new Array(lines.length).fill(null);
+  motion = new Array(lines.length).fill(null);
+  let x = 0, y = 0, z = 0, ccx = null, ccy = null;
+  let modalRapid = false;   // F is modal in Heidenhain — FMAX/F stays in effect until the next one is written
+  let planeR = MAT_ID;      // active working-plane rotation from the last PLANE SPATIAL (identity = untilted)
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    const codeOnly = line.split(";")[0];
+    // modal feed: an explicit FMAX (or "F MAX", as PLANE's own feed param is written) latches rapid
+    // on; an explicit numeric F latches it back off; anything else just carries the prior state forward
+    if(/\bF\s*MAX\b/.test(codeOnly)) modalRapid = true;
+    else if(/\bF\s*[+-]?\d+(?:\.\d+)?\b/.test(codeOnly)) modalRapid = false;
+    const mPlaneReset = line.match(RE_PLANE_RESET);
+    if(mPlaneReset){ planeR = MAT_ID; posAfter[i] = { x, y, z }; continue; }
+    const mPlaneSpatial = line.match(RE_PLANE_SPATIAL);
+    if(mPlaneSpatial){
+      const rest = mPlaneSpatial[1];
+      const spa = planeAngle(rest, "SPA"), spb = planeAngle(rest, "SPB"), spc = planeAngle(rest, "SPC");
+      // Heidenhain spatial angles are intrinsic rotations applied X, then Y, then Z (each about the
+      // already-tilted axes from the previous step) — equivalent to base = Rx·Ry·Rz · local.
+      planeR = matMul(matMul(rotX(spa*Math.PI/180), rotY(spb*Math.PI/180)), rotZ(spc*Math.PI/180));
+      posAfter[i] = { x, y, z }; continue;
+    }
+    const mCC = line.match(RE_MOVE_CC);
+    if(mCC){
+      const gx = axisVal(mCC[1], "X"), gy = axisVal(mCC[1], "Y");
+      if(gx !== null) ccx = gx;
+      if(gy !== null) ccy = gy;
+      posAfter[i] = { x, y, z };
+      continue;
+    }
+    const mL = line.match(RE_MOVE_L);
+    if(mL){
+      const gx = axisVal(mL[1], "X"), gy = axisVal(mL[1], "Y"), gz = axisVal(mL[1], "Z");
+      if(gx !== null) x = gx;
+      if(gy !== null) y = gy;
+      if(gz !== null) z = gz;
+      posAfter[i] = { x, y, z };
+      motion[i] = { kind:"line", rapid:modalRapid, R:planeR };
+      continue;
+    }
+    const mC = line.match(RE_MOVE_C);
+    if(mC){
+      const fromX = x, fromY = y, fromZ = z;
+      const gx = axisVal(mC[1], "X"), gy = axisVal(mC[1], "Y"), gz = axisVal(mC[1], "Z");
+      if(gx !== null) x = gx;
+      if(gy !== null) y = gy;
+      if(gz !== null) z = gz;
+      // Heidenhain: clockwise = DR-, counterclockwise = DR+
+      const cw = /\bDR-/.test(mC[1]) ? true : (/\bDR\+/.test(mC[1]) ? false : null);
+      posAfter[i] = { x, y, z };
+      motion[i] = { kind:"arc", rapid:modalRapid, cx:ccx, cy:ccy, fromX, fromY, fromZ, cw, R:planeR };
+      continue;
+    }
+    // CP — circular path move in polar coordinates around the active CC. IPA (incremental polar
+    // angle) or PA (absolute polar angle) sweeps around the center at the current radius; Z can
+    // change at the same time, which is exactly how a helix is hand-rolled in Klartext (a run of
+    // CP blocks, each nudging Z by a fraction of a turn). Without a CC this can't be resolved, so
+    // it just falls through and the Z carries forward like a non-motion line.
+    const mCP = line.match(RE_MOVE_CP);
+    if(mCP && ccx !== null && ccy !== null){
+      const rest = mCP[1];
+      const fromX = x, fromY = y, fromZ = z;
+      const radius = Math.hypot(fromX - ccx, fromY - ccy);
+      const angleFrom = Math.atan2(fromY - ccy, fromX - ccx);
+      const ipa = polarVal(rest, "IPA");
+      const pa  = polarVal(rest, "PA");
+      const drM = rest.match(/\bDR([+-])/);
+      const dr  = drM ? drM[1] : null;   // + = counterclockwise, - = clockwise (mirrors the C-block convention)
+      let angleTo;
+      if(ipa !== null){
+        angleTo = angleFrom + ipa * Math.PI / 180;          // increment already carries its own sign
+      } else if(pa !== null){
+        const target = pa * Math.PI / 180;
+        const TAU = Math.PI * 2;
+        let delta = dr === "-" ? (angleFrom - target) : (target - angleFrom);
+        delta = ((delta % TAU) + TAU) % TAU;
+        angleTo = dr === "-" ? angleFrom - delta : angleFrom + delta;
+      } else {
+        angleTo = angleFrom;   // no angle field present — shouldn't normally happen
+      }
+      const gz = axisVal(rest, "Z");
+      if(gz !== null) z = gz;
+      x = ccx + radius * Math.cos(angleTo);
+      y = ccy + radius * Math.sin(angleTo);
+      posAfter[i] = { x, y, z };
+      motion[i] = {
+        kind:"arc", rapid:modalRapid, cx:ccx, cy:ccy,
+        fromX, fromY, fromZ, cw: (angleTo < angleFrom), R:planeR
+      };
+      continue;
+    }
+    posAfter[i] = { x, y, z };   // not a motion line — carry the modal position forward unchanged
+  }
+}
+
+// Builds toolGroups/inherited/callLines from the current `lines` array. Kept
+// separate from parse() so it can be re-run (e.g. when NAME_WINDOW changes)
+// without re-splitting the source text and losing any in-progress edits.
+function buildGroups(){
+  toolGroups = [];
+  inherited = {};
+  callLines = [];
+  let pendingLabel = null, pendingPos = -1;   // first * label seen since the LAST tool call of any kind —
+                              // a second stacked * line (e.g. a sub-position like "X5") never overrides it,
+                              // and it's cleared by every call (header OR re-call) so a label sitting next
+                              // to one re-call can never leak forward onto a later, unrelated header
+  let group = null;          // the toolGroups entry currently accepting re-calls
+  lines.forEach((line, i) => {
+    const s = line.match(RE_STRUCT);
+    if(s){
+      const text = s[3].replace(/^[-\s]+/,"").trim() || "(unnamed)";
+      if(pendingLabel === null){ pendingLabel = text; pendingPos = i; }
+      return;
+    }
+    if(!RE_TOOLCALL.test(line)) return;
+    callLines.push(i);
+    const label = (pendingLabel !== null && (i - pendingPos) <= NAME_WINDOW) ? pendingLabel : null;
+    pendingLabel = null; pendingPos = -1;   // always reset — consumed by THIS call, whatever kind it is
+    const c = parseCall(line);
+    if(c.recall){
+      if(!group){ group = { id:toolGroups.length, label:"(continued)", ref:null, calls:[] }; toolGroups.push(group); }
+      group.calls.push(i);
+      inherited[i] = { name: group.label };
+    } else {
+      const name = isQuoted(c.ref) ? c.ref.replace(/"/g,"") : null;
+      group = {
+        id: toolGroups.length,
+        label: label || name || ("TOOL CALL " + c.ref),
+        ref: c.ref,
+        calls: [i],
+      };
+      toolGroups.push(group);
+    }
+  });
+}
+
+// The per-card name tag: the nearest * line directly above a call, but only if
+// it's within NAME_WINDOW lines — far-away comments (across an unrelated gap)
+// are deliberately dropped rather than misattached. Recomputed standalone (not
+// inside parse) so the lookup distance can be changed live without reloading.
+function computeNearStruct(){
+  nearStruct = {};
+  let label = null, labelPos = -1;
+  lines.forEach((line, i) => {
+    const s = line.match(RE_STRUCT);
+    if(s){ label = s[3].replace(/^[-\s]+/,"").trim() || "(unnamed)"; labelPos = i; return; }
+    if(!RE_TOOLCALL.test(line)) return;
+    nearStruct[i] = (label !== null && (i - labelPos) <= NAME_WINDOW) ? label : null;
+    label = null; labelPos = -1;   // consumed either way
+  });
+}
+
+// ---- left : structure legend --------------------------------------------
+const legendEl = document.getElementById("legend");
+const filterEl = document.getElementById("filterInput");
+
+function sectionEdits(grp){
+  let n = 0;
+  for(const idx of grp.calls) if(lines[idx] !== original[idx]) n++;
+  return n;
+}
+function renderLegend(){
+  const q = filterEl.value.trim().toLowerCase();
+  const shown = toolGroups.filter(g => g.calls.length && (!q || g.label.toLowerCase().includes(q) || (g.ref||"").includes(q)));
+  legendEl.innerHTML = "";
+  document.getElementById("secCount").textContent = shown.length + (q ? " / " + toolGroups.length : "");
+  shown.forEach(grp => {
+    const edits = sectionEdits(grp);
+    const recalls = grp.calls.length - 1;
+    const el = document.createElement("div");
+    el.className = "sec" + (activeSection === grp.id ? " active" : "");
+    el.innerHTML =
+      '<span class="tick">*</span><div class="body">'
+      + '<div class="label"></div>'
+      + '<div class="meta">'
+      + (recalls > 0 ? '<span>+' + recalls + (recalls===1?' re-call':' re-calls') + '</span>' : '')
+      + (edits ? '<span class="dot">● ' + edits + ' edited</span>' : '')
+      + '</div></div>';
+    el.querySelector(".label").textContent = grp.ref
+      ? grp.label + " - TOOL CALL " + grp.ref
+      : grp.label;
+    el.onclick = () => selectSection(grp.id);
+    legendEl.appendChild(el);
+  });
+}
+
+// ---- center : tool-call editor ------------------------------------------
+const editorEl = document.getElementById("editor");
+
+function fieldHTML(idx, key, label, help){
+  const cur = parseCall(lines[idx])[key];
+  const set = cur !== null;
+  return ''
+    + '<div class="field">'
+    +   '<label>' + label + ' <span class="help">' + help + '</span></label>'
+    +   '<div class="stepper' + (set ? ' set' : '') + '" data-key="' + key + '">'
+    +     '<button data-step="-0.01" title="−0.01">−</button>'
+    +     '<input type="text" inputmode="decimal" value="' + (set ? cur : "") + '" placeholder="—">'
+    +     '<button data-step="0.01" title="+0.01">+</button>'
+    +     '<span class="unit">mm</span>'
+    +   '</div>'
+    +   '<div class="was"></div>'
+    + '</div>';
+}
+function selectSection(id){
+  activeSection = id;
+  const grp = toolGroups[id];
+  renderLegend();
+  const n = grp.calls.length;
+  document.getElementById("callCount").textContent = n + (n===1 ? " call" : " calls") + " — “" + grp.label + "”";
+  editorEl.innerHTML = "";
+  if(!n){ editorEl.innerHTML = '<div class="empty">No tool calls in this group.</div>'; return; }
+
+  grp.calls.forEach(idx => editorEl.appendChild(buildCard(idx)));
+}
+
+// Build one fully-wired card: identity + nearby structure line + DL/DR/DR2 fields. No raw NC text.
+function buildCard(idx){
+  const c = parseCall(lines[idx]);
+  const recall = c.recall;
+  const card = document.createElement("div");
+  card.className = "card" + (recall ? " recall" : "") + (lines[idx] !== original[idx] ? " modified" : "");
+  card.dataset.idx = idx;
+  const cool = coolantFor(idx);
+  const coolHTML = cool.length
+    ? cool.map(x => '<span class="chip cool-on" title="' + coolLabel(x.code) + ' — line ' + x.line + '">M' + x.code + '</span>').join("")
+    : '<span class="chip cool-none">dry</span>';
+  const nl = nearStruct[idx];
+  const nearHTML = nl ? '<span class="near-line" title="structure line immediately above this call">* - ' + esc(nl) + '</span>' : "";
+  const fields =
+      '<div class="fields">'
+    +   fieldHTML(idx,"DL","DL","length oversize")
+    +   fieldHTML(idx,"DR","DR","radius oversize")
+    +   fieldHTML(idx,"DR2","DR2","corner-radius")
+    + '</div>';
+  if(recall){
+    card.innerHTML =
+      '<div class="card-head">'
+      +  '<span class="kw">TOOL CALL</span> <span class="recall-tag">↳ re-call</span>'
+      +  nearHTML + coolHTML
+      + '</div>' + fields;
+  } else {
+    const refName = isQuoted(c.ref);
+    card.innerHTML =
+      '<div class="card-head">'
+      +  '<span class="kw">TOOL CALL</span> <span class="ref' + (refName?' name':'') + '"></span>'
+      +  nearHTML + coolHTML
+      + '</div>' + fields;
+    card.querySelector(".ref").textContent = c.ref || "?";
+  }
+  wireCard(card, idx);
+  refreshCard(card, idx);
+  return card;
+}
+function wireCard(card, idx){
+  card.querySelectorAll(".stepper").forEach(st => {
+    const key = st.dataset.key;
+    const input = st.querySelector("input");
+    st.querySelectorAll("button").forEach(b => {
+      b.onclick = () => {
+        selectCard(card, idx);
+        const step = parseFloat(b.dataset.step);
+        const base = input.value.trim() === "" ? 0 : (parseFloat(input.value) || 0);
+        commit(card, idx, key, (Math.round((base + step) * 1000) / 1000).toString());
+      };
+    });
+    input.addEventListener("focus", () => selectCard(card, idx));   // clicking into the field jumps too
+    input.addEventListener("change", () => commit(card, idx, key, input.value.trim()));
+    input.addEventListener("keydown", e => { if(e.key === "Enter") input.blur(); });
+  });
+  // click anywhere else on the card jumps + highlights (inputs are handled above via focus)
+  card.addEventListener("click", e => {
+    if(e.target.closest("input, button")) return;
+    selectCard(card, idx);
+  });
+}
+function commit(card, idx, key, value){
+  if(value !== "" && !isFinite(Number(value))) return;     // ignore junk, keep prior value
+  setField(idx, key, value);
+  card.classList.toggle("modified", lines[idx] !== original[idx]);
+  refreshCard(card, idx);
+  renderLegend();
+  drawProgram();
+  updateChrome();
+}
+function refreshCard(card, idx){
+  const c = parseCall(lines[idx]);
+  const o = parseCall(original[idx]) || {};
+  ["DL","DR","DR2"].forEach(key => {
+    const st = card.querySelector('.stepper[data-key="' + key + '"]');
+    const input = st.querySelector("input");
+    const set = c[key] !== null;
+    if(document.activeElement !== input) input.value = set ? c[key] : "";
+    st.classList.toggle("set", set);
+    const was = st.parentElement.querySelector(".was");
+    const ov = o[key], nv = c[key];
+    was.innerHTML = (ov !== nv) ? ('was ' + (ov===null?"—":ov) + ' → <b>' + (nv===null?"—":nv) + '</b>') : "";
+  });
+}
+
+// ---- right : virtualized program view -----------------------------------
+const wrap = document.getElementById("progWrap");
+const spacer = document.getElementById("progSpacer");
+const slice = document.getElementById("progSlice");
+const ROW = 20;
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function highlight(line){
+  let h = esc(line);
+  if(RE_STRUCT.test(line))        return '<span class="t-struct">' + h + '</span>';
+  if(/^\s*\d+\s+;/.test(line) || /^\s*;/.test(line))
+                                  return '<span class="t-cmt">' + h + '</span>';
+  h = h.replace(KW_RE, '<span class="t-kw">$1</span>');
+  h = h.replace(/\b(DL|DR2|DR)\s*[+-]?\d+(?:\.\d+)?/g, '<span class="t-delta">$&</span>');
+  return h;
+}
+function drawProgram(){
+  spacer.style.height = (lines.length * ROW) + "px";
+  const top = wrap.scrollTop, h = wrap.clientHeight;
+  const first = Math.max(0, Math.floor(top / ROW) - 6);
+  const last  = Math.min(lines.length, Math.ceil((top + h) / ROW) + 6);
+  slice.style.top = (first * ROW) + "px";
+  let html = "";
+  for(let i = first; i < last; i++){
+    const cls = "pl" + (i === activeLine ? " active" : "") + (lines[i] !== original[i] ? " mod" : "");
+    html += '<div class="' + cls + '"><span class="ln">' + i + '</span><span class="src">' + highlight(lines[i]) + '</span></div>';
+  }
+  slice.innerHTML = html;
+}
+wrap.addEventListener("scroll", drawProgram);
+function gotoLine(idx){
+  activeLine = idx;
+  const target = idx * ROW - wrap.clientHeight / 2 + ROW;
+  wrap.scrollTop = Math.max(0, target);
+  drawProgram();
+}
+// jump to the call's line in the program view and mark which card is in focus
+function selectCard(card, idx){
+  document.querySelectorAll(".card.sel").forEach(c => c.classList.remove("sel"));
+  card.classList.add("sel");
+  card.classList.remove("flash"); void card.offsetWidth; card.classList.add("flash");  // restart pulse
+  gotoLine(idx);
+  drawToolpath(idx);
+}
+
+// ---- toolpath preview: traces motion from this call up to (not including) the next ----
+function buildPathSegments(idx){
+  const { next } = neighborCalls(idx);
+  const end = (next === Infinity ? lines.length : next) - 1;
+  const segs = [];
+  for(let i = idx + 1; i <= end; i++){
+    const m = motion[i];
+    if(!m) continue;
+    const from = posAfter[i - 1] || { x:0, y:0, z:0 };
+    const to = posAfter[i];
+    const R = m.R || MAT_ID;
+    if(m.kind === "line"){
+      // a straight line stays straight under a linear transform, so just rotate both endpoints
+      const [x1,y1,z1] = applyMat(R, from.x, from.y, from.z);
+      const [x2,y2,z2] = applyMat(R, to.x, to.y, to.z);
+      segs.push({ kind:"line", rapid:m.rapid, x1, y1, z1, x2, y2, z2 });
+    } else {
+      // keep the arc in its own (possibly tilted) local plane here — segPoints3 samples the circle
+      // in local coordinates and rotates each sample, which is what keeps a helix round when it's
+      // milled in a plane tilted by PLANE SPATIAL instead of flattening it into a chord
+      segs.push({ kind:"arc", rapid:m.rapid, x1:m.fromX, y1:m.fromY, z1:m.fromZ,
+                  x2:to.x, y2:to.y, z2:to.z, cx:m.cx, cy:m.cy, cw:m.cw, R });
+    }
+  }
+  return trimApproachAndRetract(segs);
+}
+// The raw segment list runs from right after the TOOL CALL to right before the next one, which
+// includes the rapid travel in from wherever the machine happened to be (positioning XY, then a
+// rapid plunge down to a safe approach height) and, at the end, the rapid travel back out (a
+// retract, then often more rapid moves toward park/the next operation, plus M-codes like M140
+// that don't even register as motion here). None of that is part of the actual cut, and including
+// it draws lines that start or end "somewhere in space" unrelated to the operation. So: start the
+// drawn path at the beginning of the first feed (F) move — i.e. at the end of the last rapid
+// approach — and end it one rapid move after the last feed move (the final retract), dropping
+// anything beyond that.
+function trimApproachAndRetract(segs){
+  const firstFeed = segs.findIndex(s => !s.rapid);
+  if(firstFeed === -1) return segs;   // nothing but rapids (e.g. a pure positioning call) — leave as-is
+  let lastFeed = -1;
+  for(let k = segs.length - 1; k >= 0; k--){ if(!segs[k].rapid){ lastFeed = k; break; } }
+  const end = Math.min(segs.length, lastFeed + 2);   // keep exactly one trailing rapid: the retract
+  return segs.slice(firstFeed, end);
+}
+// Sampled points always carry [x,y,z] — z is linearly interpolated along arcs too,
+// so a helical C/CP block still shows real depth change in the 3D view. Points are
+// returned in WORLD (base machine) coordinates: arcs are sampled in their local plane
+// first, then each sample is rotated through seg.R, so a tilted-plane helix samples
+// round instead of getting flattened into a straight chord.
+function segPoints3(seg){
+  const R = seg.R || MAT_ID;
+  if(seg.kind === "line") return [[seg.x1,seg.y1,seg.z1], [seg.x2,seg.y2,seg.z2]];
+  if(seg.cx === null || seg.cy === null || seg.cw === null){
+    return [applyMat(R, seg.x1, seg.y1, seg.z1), applyMat(R, seg.x2, seg.y2, seg.z2)];   // missing center/direction — draw the chord
+  }
+  const a0 = Math.atan2(seg.y1 - seg.cy, seg.x1 - seg.cx);
+  const a1 = Math.atan2(seg.y2 - seg.cy, seg.x2 - seg.cx);
+  const r = Math.hypot(seg.x1 - seg.cx, seg.y1 - seg.cy);
+  const TAU = Math.PI * 2;
+  let delta = seg.cw ? (a0 - a1) : (a1 - a0);
+  delta = ((delta % TAU) + TAU) % TAU;
+  if(delta < 1e-3) delta = TAU;   // start ≈ end — treat as a full circle, not a zero move
+  const N = Math.max(8, Math.round((delta / TAU) * 48));
+  const pts = [];
+  for(let k = 0; k <= N; k++){
+    const t = k / N;
+    const a = seg.cw ? a0 - delta * t : a0 + delta * t;
+    const lx = seg.cx + r * Math.cos(a), ly = seg.cy + r * Math.sin(a), lz = seg.z1 + (seg.z2 - seg.z1) * t;
+    pts.push(applyMat(R, lx, ly, lz));
+  }
+  return pts;
+}
+// projections: 2D top view (X-Y, flipped so screen-up = +Y) and a real orbit camera
+// for 3D — azimuth (spin around vertical) + elevation (tilt), driven by pointer drag
+let pathAz = -Math.PI / 4, pathEl = Math.PI / 6;   // defaults land close to a classic isometric look
+const PATH_EL_LIMIT = 1.45;   // keep just short of looking straight down/up — avoids gimbal flip
+function proj2D(x, y, z){ return [x, -y]; }
+function proj3D(x, y, z){
+  const cosA = Math.cos(pathAz), sinA = Math.sin(pathAz);
+  const x1 = x*cosA - y*sinA, y1 = x*sinA + y*cosA, z1 = z;     // spin around the vertical (Z) axis
+  const cosE = Math.cos(pathEl), sinE = Math.sin(pathEl);
+  const y2 = y1*cosE - z1*sinE, z2 = y1*sinE + z1*cosE;          // tilt (elevation)
+  return [x1, -z2];                                              // orthographic: screen-up = +Z
+}
+let pathViewMode = "3d";
+let lastPathIdx = -1;
+function project(x, y, z){ return pathViewMode === "3d" ? proj3D(x, y, z) : proj2D(x, y, z); }
+
+function drawAxisGizmo(W, H){
+  const anchor = [30, H - 26], L = 16;
+  const axes = [ ["X", proj3D(1,0,0), "var(--red)"], ["Y", proj3D(0,1,0), "var(--green)"], ["Z", proj3D(0,0,1), "var(--blue)"] ];
+  let svg = "";
+  axes.forEach(([label, [vx,vy], color]) => {
+    const m = Math.hypot(vx, vy) || 1;
+    const ex = anchor[0] + (vx/m)*L, ey = anchor[1] + (vy/m)*L;
+    svg += '<line x1="' + anchor[0] + '" y1="' + anchor[1] + '" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1)
+         + '" stroke="' + color + '" stroke-width="1.4"/>';
+    svg += '<text x="' + (ex + (vx/m)*7).toFixed(1) + '" y="' + (ey + (vy/m)*7).toFixed(1)
+         + '" font-size="9" fill="' + color + '" text-anchor="middle" dominant-baseline="middle">' + label + '</text>';
+  });
+  return svg;
+}
+function drawToolpath(idx){
+  if(document.getElementById("pathPanel").classList.contains("hide")) return;
+  lastPathIdx = idx;
+  const grp = toolGroups.find(g => g.calls.includes(idx));
+  document.getElementById("pathTitle").textContent = "Toolpath — " + (grp ? grp.label : "TOOL CALL");
+  const segs = buildPathSegments(idx);
+  const body = document.getElementById("pathBody");
+  const foot = document.getElementById("pathFoot");
+  if(!segs.length){
+    body.innerHTML = '<div class="empty">No L/C/CP motion found before the next tool call.</div>';
+    foot.innerHTML = "";
+    return;
+  }
+  // Sample every point once in WORLD space. The view is fit to a bounding *sphere* (not the
+  // on-screen bounding box) so its on-screen size stays constant from any orbit angle — fitting
+  // to the rotating 2D bbox instead is what made the view visibly zoom in/out while orbiting.
+  const worldPolylines = segs.map(seg => ({ pts: segPoints3(seg), rapid: seg.rapid }));
+  let minZ=Infinity, maxZ=-Infinity, cxw=0, cyw=0, czw=0, count=0;
+  worldPolylines.forEach(pl => pl.pts.forEach(([x,y,z]) => {
+    minZ=Math.min(minZ,z); maxZ=Math.max(maxZ,z);
+    cxw+=x; cyw+=y; czw+=z; count++;
+  }));
+  cxw/=count; cyw/=count; czw/=count;
+  let radius = 0.001;
+  worldPolylines.forEach(pl => pl.pts.forEach(([x,y,z]) => {
+    radius = Math.max(radius, Math.hypot(x-cxw, y-cyw, z-czw));
+  }));
+  const W = Math.max(120, body.clientWidth || 300), H = Math.max(120, body.clientHeight || 300);
+  const pad = 22;
+  const scale = ((Math.min(W, H) - pad*2) / (2*radius)) * pathZoom;
+  const [vcx, vcy] = project(cxw, cyw, czw);   // where the (fixed-size) path's center lands for this orbit angle
+  const toSvg = (px, py) => [ W/2 + (px - vcx) * scale + pathPanX, H/2 + (py - vcy) * scale + pathPanY ];
+  const polylines = worldPolylines.map(pl => ({ proj: pl.pts.map(([x,y,z]) => project(x,y,z)), rapid: pl.rapid }));
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  polylines.forEach(pl => {
+    const d = pl.proj.map(([px,py]) => { const [sx,sy] = toSvg(px,py); return sx.toFixed(1) + "," + sy.toFixed(1); }).join(" ");
+    svg += '<polyline points="' + d + '" fill="none" stroke="' + (pl.rapid ? "var(--rapid)" : "var(--cyan)") + '" '
+         + 'stroke-width="' + (pl.rapid ? 1.6 : 2) + '" stroke-linecap="round"/>';
+  });
+  const firstPt = polylines[0].proj[0], lastPolyline = polylines[polylines.length-1];
+  const lastPt = lastPolyline.proj[lastPolyline.proj.length-1];
+  const [fx,fy] = toSvg(firstPt[0], firstPt[1]);
+  const [lx,ly] = toSvg(lastPt[0], lastPt[1]);
+  svg += '<circle cx="' + fx.toFixed(1) + '" cy="' + fy.toFixed(1) + '" r="4" fill="var(--green)"/>';
+  svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="4" fill="var(--red)"/>';
+  if(pathViewMode === "3d") svg += drawAxisGizmo(W, H);
+  svg += '</svg>';
+  body.innerHTML = svg;
+  const rapidCount = segs.filter(s => s.rapid).length;
+  foot.innerHTML =
+      '<span class="legend-line"><span class="swatch" style="background:var(--cyan)"></span>F ('
+    + (segs.length - rapidCount) + ') <span class="swatch" style="background:var(--rapid); margin-left:6px"></span>FMAX (' + rapidCount + ')</span>'
+    + '<span>Z ' + minZ.toFixed(2) + ' → ' + maxZ.toFixed(2) + '</span>';
+}
+function setPathView(mode){
+  pathViewMode = mode;
+  document.getElementById("path2dBtn").classList.toggle("active", mode === "2d");
+  document.getElementById("path3dBtn").classList.toggle("active", mode === "3d");
+  document.getElementById("pathPanel").classList.toggle("mode-3d", mode === "3d");
+  if(lastPathIdx >= 0) drawToolpath(lastPathIdx);
+}
+document.getElementById("path2dBtn").onclick = () => setPathView("2d");
+document.getElementById("path3dBtn").onclick = () => setPathView("3d");
+const pathPanelEl = document.getElementById("pathPanel");
+document.getElementById("pathBtn").onclick = () => {
+  pathPanelEl.classList.toggle("hide");
+  if(!pathPanelEl.classList.contains("hide") && activeLine >= 0) drawToolpath(activeLine);
+};
+document.getElementById("pathClose").onclick = () => pathPanelEl.classList.add("hide");
+
+// single rAF-debounced redraw, shared by panel resize and orbit/pan dragging
+let pathRedrawRAF = null;
+function schedulePathRedraw(){
+  if(pathRedrawRAF) return;
+  pathRedrawRAF = requestAnimationFrame(() => {
+    pathRedrawRAF = null;
+    if(lastPathIdx >= 0 && !pathPanelEl.classList.contains("hide")) drawToolpath(lastPathIdx);
+  });
+}
+// redraw whenever the panel changes size (manual resize handle below, or viewport reflow)
+new ResizeObserver(schedulePathRedraw).observe(pathPanelEl);
+
+// ---- camera: orbit (rotate), pan, and zoom ----
+// Plain drag orbits in 3D (meaningless in 2D, so it pans instead); Shift+drag always pans;
+// wheel always zooms. Double-click resets all three to the default view.
+let pathZoom = 1, pathPanX = 0, pathPanY = 0;
+const PATH_ZOOM_MIN = 0.15, PATH_ZOOM_MAX = 8;
+const pathBody = document.getElementById("pathBody");
+let pathDragging = false, pathPanning = false, pathLastX = 0, pathLastY = 0;
+pathBody.addEventListener("pointerdown", e => {
+  pathDragging = true;
+  pathPanning = (pathViewMode !== "3d") || e.shiftKey || e.button === 1 || e.button === 2;
+  pathLastX = e.clientX; pathLastY = e.clientY;
+  pathBody.setPointerCapture(e.pointerId);
+  pathBody.classList.add("dragging");
+});
+pathBody.addEventListener("pointermove", e => {
+  if(!pathDragging) return;
+  const dx = e.clientX - pathLastX, dy = e.clientY - pathLastY;
+  pathLastX = e.clientX; pathLastY = e.clientY;
+  if(pathPanning){
+    pathPanX += dx; pathPanY += dy;
+  } else {
+    pathAz += dx * 0.008;
+    pathEl = Math.max(-PATH_EL_LIMIT, Math.min(PATH_EL_LIMIT, pathEl - dy * 0.008));
+  }
+  schedulePathRedraw();
+});
+function pathDragEnd(){ pathDragging = false; pathBody.classList.remove("dragging"); }
+pathBody.addEventListener("pointerup", pathDragEnd);
+pathBody.addEventListener("pointercancel", pathDragEnd);
+pathBody.addEventListener("contextmenu", e => e.preventDefault());   // right-drag is a pan gesture, not a menu
+pathBody.addEventListener("wheel", e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.09 : 1/1.09;
+  pathZoom = Math.max(PATH_ZOOM_MIN, Math.min(PATH_ZOOM_MAX, pathZoom * factor));
+  schedulePathRedraw();
+}, { passive:false });
+pathBody.addEventListener("dblclick", () => {
+  pathAz = -Math.PI/4; pathEl = Math.PI/6; pathZoom = 1; pathPanX = 0; pathPanY = 0;   // reset to the default view
+  schedulePathRedraw();
+});
+
+// ---- custom resize grip, anchored top-left so dragging it visibly grows/shrinks the panel
+// from that corner while the panel stays pinned to the bottom-right of the viewport ----
+const pathResize = document.getElementById("pathResize");
+let resizing = false, resizeStartX = 0, resizeStartY = 0, resizeStartW = 0, resizeStartH = 0;
+pathResize.addEventListener("pointerdown", e => {
+  e.preventDefault(); e.stopPropagation();
+  resizing = true;
+  resizeStartX = e.clientX; resizeStartY = e.clientY;
+  const rect = pathPanelEl.getBoundingClientRect();
+  resizeStartW = rect.width; resizeStartH = rect.height;
+  pathResize.setPointerCapture(e.pointerId);
+});
+pathResize.addEventListener("pointermove", e => {
+  if(!resizing) return;
+  // dragging the handle up/left grows the panel (it expands away from the pinned bottom-right corner)
+  const dx = resizeStartX - e.clientX, dy = resizeStartY - e.clientY;
+  const maxW = window.innerWidth * 0.9, maxH = window.innerHeight * 0.85;
+  pathPanelEl.style.width  = Math.max(240, Math.min(maxW, resizeStartW + dx)) + "px";
+  pathPanelEl.style.height = Math.max(220, Math.min(maxH, resizeStartH + dy)) + "px";
+});
+function pathResizeEnd(){ resizing = false; }
+pathResize.addEventListener("pointerup", pathResizeEnd);
+pathResize.addEventListener("pointercancel", pathResizeEnd);
+
+// panel is visible by default — seed it with a friendly placeholder until a tool call is picked
+document.getElementById("pathBody").innerHTML = '<div class="empty">Select a tool call on the left to preview its toolpath.</div>';
+
+
+
+// ---- chrome / load / export ---------------------------------------------
+function updateChrome(){
+  let n = 0;
+  for(let i = 0; i < lines.length; i++) if(lines[i] !== original[i]) n++;
+  const b = document.getElementById("editBadge");
+  b.textContent = n + (n === 1 ? " edit" : " edits");
+  b.classList.toggle("zero", n === 0);
+  document.getElementById("resetBtn").disabled = n === 0;
+  document.getElementById("exportBtn").disabled = !lines.length;
+  document.getElementById("copyBtn").disabled = !lines.length;
+  document.getElementById("lineCount").textContent = lines.length + " blocks";
+}
+function load(text, name){
+  fileName = name || fileName;
+  parse(text);
+  activeSection = null; activeLine = -1;
+  document.getElementById("fileLabel").innerHTML = "<b>" + esc(fileName) + "</b>"
+    + (currentFileHandle ? '<span class="linked" title="Linked to the original file">● linked</span>' : "");
+  filterEl.value = "";
+  renderLegend();
+  editorEl.innerHTML = '<div class="empty">Select a tool call on the left to edit its DL/DR/DR2 offsets.<br><br>'
+    + toolGroups.length + ' tool calls · '
+    + toolGroups.reduce((a,g)=>a+g.calls.length,0) + ' blocks (incl. re-calls) found.</div>';
+  drawProgram();
+  updateChrome();
+  // open the first tool-call group
+  const first = toolGroups.find(g => g.calls.length);
+  if(first) selectSection(first.id);
+}
+function exportText(){ return lines.join(newline); }
+
+// ---- save modal: shows exactly which lines changed (old → new) before saving ----
+function buildDiffRows(){
+  const rows = [];
+  for(let i = 0; i < lines.length; i++) if(lines[i] !== original[i]) rows.push({ n:i, oldText:original[i], newText:lines[i] });
+  return rows;
+}
+function openSaveModal(){
+  const rows = buildDiffRows();
+  const body = document.getElementById("saveDiffBody");
+  body.innerHTML = rows.length
+    ? rows.map(r =>
+        '<div class="diff-row">'
+        + '<div class="diff-ln">Line ' + r.n + '</div>'
+        + '<div class="diff-old">− ' + esc(r.oldText) + '</div>'
+        + '<div class="diff-new">+ ' + esc(r.newText) + '</div>'
+        + '</div>').join("")
+    : '<div class="diff-empty">No changes yet — this saves an exact copy of the file as opened.</div>';
+  document.getElementById("saveFileName").value = fileName;
+  const note = document.getElementById("linkNote");
+  const inPlaceBtn = document.getElementById("saveInPlaceBtn");
+  if(currentFileHandle){
+    note.textContent = "Linked to the original file — Save overwrites it directly, no dialog.";
+    note.classList.remove("unlinked");
+    inPlaceBtn.style.display = "";
+  } else {
+    note.textContent = "Opened without file access — use Save As… to choose a location.";
+    note.classList.add("unlinked");
+    inPlaceBtn.style.display = "none";
+  }
+  document.getElementById("saveOverlay").classList.add("show");
+}
+function closeSaveModal(){ document.getElementById("saveOverlay").classList.remove("show"); }
+async function performSaveInPlace(){
+  if(!currentFileHandle) return;
+  try{
+    if((await currentFileHandle.queryPermission({ mode:"readwrite" })) !== "granted"){
+      const perm = await currentFileHandle.requestPermission({ mode:"readwrite" });
+      if(perm !== "granted") return;   // user declined the permission prompt
+    }
+    const writable = await currentFileHandle.createWritable();
+    await writable.write(exportText());
+    await writable.close();
+    afterSave(currentFileHandle.name);
+  }catch(err){
+    alert("Couldn't save to the original file: " + (err && err.message ? err.message : err));
+  }
+}
+async function performSaveAs(){
+  const text = exportText();
+  const nameEl = document.getElementById("saveFileName");
+  const suggested = (nameEl.value || fileName).trim() || "program.H";
+  if(window.showSaveFilePicker){
+    try{
+      const opts = {
+        suggestedName: suggested,
+        types: [{ description:"Heidenhain NC program", accept:{ "text/plain":[".h",".H"] } }],
+      };
+      // open the dialog where the file was grabbed from, else the remembered default folder
+      opts.startIn = currentFileHandle || defaultDirHandle || undefined;
+      const handle = await window.showSaveFilePicker(opts);
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      currentFileHandle = handle;   // future Saves go straight back to this new location
+      afterSave(handle.name);
+      return;
+    }catch(err){
+      if(err && err.name === "AbortError") return;   // user cancelled the picker — leave modal open
+      // any other error: fall through to the plain-download fallback below
+    }
+  }
+  const blob = new Blob([text], {type:"text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = suggested;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  afterSave(suggested);
+}
+function afterSave(newName){
+  fileName = newName;
+  document.getElementById("fileLabel").innerHTML = "<b>" + esc(fileName) + "</b>"
+    + (currentFileHandle ? '<span class="linked" title="Linked to the original file">● linked</span>' : "");
+  original = lines.slice();   // saved state becomes the new edit baseline
+  renderLegend(); drawProgram(); updateChrome(); reRenderActive();
+  closeSaveModal();
+}
+
+// ---- opening a file: prefer a real handle (lets "Save" write back in place) ----
+async function openFilePicker(){
+  if(FS_ACCESS){
+    try{
+      const opts = { types:[{ description:"Heidenhain NC program", accept:{ "text/plain":[".h",".H"] } }] };
+      if(defaultDirHandle) opts.startIn = defaultDirHandle;
+      const [handle] = await window.showOpenFilePicker(opts);
+      const file = await handle.getFile();
+      const text = await file.text();
+      currentFileHandle = handle;
+      load(text, handle.name);
+      return;
+    }catch(err){
+      if(err && err.name === "AbortError") return;   // user cancelled — don't fall through to the legacy input
+    }
+  }
+  currentFileHandle = null;
+  document.getElementById("fileInput").click();
+}
+document.getElementById("openBtn").onclick = openFilePicker;
+const themeBtn = document.getElementById("themeBtn");
+themeBtn.onclick = () => {
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  if(dark){ document.documentElement.removeAttribute("data-theme"); themeBtn.textContent = "☾ Dark"; }
+  else    { document.documentElement.setAttribute("data-theme", "dark"); themeBtn.textContent = "☀ Light"; }
+};
+document.getElementById("fileInput").onchange = e => {
+  const f = e.target.files[0]; if(!f) return;
+  currentFileHandle = null;   // the legacy <input> never gives a writable handle
+  const r = new FileReader();
+  r.onload = () => load(r.result, f.name);
+  r.readAsText(f);
+};
+
+// ---- default folder: remembered across reloads via IndexedDB ----
+const folderBtn = document.getElementById("folderBtn");
+function updateFolderBtn(){
+  folderBtn.textContent = defaultDirHandle ? "📁 " + defaultDirHandle.name : "📁 Default folder…";
+}
+folderBtn.onclick = async () => {
+  if(!FS_ACCESS){
+    alert("This browser doesn't support picking a default folder (Chrome or Edge required). Save As… will still work normally.");
+    return;
+  }
+  try{
+    const handle = await window.showDirectoryPicker({ mode:"readwrite" });
+    defaultDirHandle = handle;
+    await idbSet("defaultDir", handle);
+    updateFolderBtn();
+  }catch(err){ /* user cancelled the picker — nothing to do */ }
+};
+if(!FS_ACCESS){ folderBtn.title = "Requires Chrome or Edge"; folderBtn.style.opacity = ".5"; }
+(async () => {
+  if(!FS_ACCESS) return;
+  const saved = await idbGet("defaultDir");
+  if(saved){ defaultDirHandle = saved; updateFolderBtn(); }
+})();
+
+document.getElementById("exportBtn").onclick = openSaveModal;
+document.getElementById("saveModalClose").onclick = closeSaveModal;
+document.getElementById("saveCancelBtn").onclick = closeSaveModal;
+document.getElementById("saveInPlaceBtn").onclick = performSaveInPlace;
+document.getElementById("saveAsBtn").onclick = performSaveAs;
+document.getElementById("saveOverlay").addEventListener("click", e => { if(e.target.id === "saveOverlay") closeSaveModal(); });
+window.addEventListener("keydown", e => { if(e.key === "Escape") closeSaveModal(); });
+document.getElementById("copyBtn").onclick = () => {
+  navigator.clipboard.writeText(exportText());
+  const btn = document.getElementById("copyBtn"); const t = btn.textContent;
+  btn.textContent = "Copied"; setTimeout(() => btn.textContent = t, 1100);
+};
+document.getElementById("resetBtn").onclick = () => {
+  lines = original.slice();
+  if(activeSection !== null) selectSection(activeSection);
+  renderLegend(); drawProgram(); updateChrome();
+};
+filterEl.addEventListener("input", renderLegend);
+
+const coolWatchEl = document.getElementById("coolWatch");
+const coolWinEl = document.getElementById("coolWin");
+function reRenderActive(){ if(activeSection !== null) selectSection(activeSection); }
+coolWatchEl.addEventListener("input", () => { COOLANT_WATCH = parseWatch(coolWatchEl.value); reRenderActive(); });
+coolWinEl.addEventListener("input", () => {
+  const n = parseInt(coolWinEl.value, 10);
+  COOLANT_WINDOW = isFinite(n) && n > 0 ? Math.min(50, n) : 10;
+  reRenderActive();
+});
+
+const nameWinEl = document.getElementById("nameWin");
+nameWinEl.addEventListener("input", () => {
+  const n = parseInt(nameWinEl.value, 10);
+  NAME_WINDOW = isFinite(n) && n >= 0 ? Math.min(30, n) : 5;
+  buildGroups();        // legend titles depend on NAME_WINDOW too — rebuild them
+  computeNearStruct();  // per-card name tags
+  renderLegend();
+  reRenderActive();
+});
+
+// drag + drop — try to grab a real handle (Chromium) so a dropped file can also be saved in place
+const drop = document.getElementById("drop");
+window.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("show"); });
+window.addEventListener("dragleave", e => { if(e.relatedTarget === null) drop.classList.remove("show"); });
+window.addEventListener("drop", async e => {
+  e.preventDefault(); drop.classList.remove("show");
+  const item = e.dataTransfer.items && e.dataTransfer.items[0];
+  if(item && item.kind === "file" && item.getAsFileSystemHandle){
+    try{
+      const handle = await item.getAsFileSystemHandle();
+      if(handle && handle.kind === "file"){
+        const file = await handle.getFile();
+        const text = await file.text();
+        currentFileHandle = handle;
+        load(text, handle.name);
+        return;
+      }
+    }catch(_){ /* fall through to the plain-file path below */ }
+  }
+  const f = e.dataTransfer.files[0]; if(!f) return;
+  currentFileHandle = null;
+  const r = new FileReader(); r.onload = () => load(r.result, f.name); r.readAsText(f);
+});
+
+</script>
+</body>
+</html>
