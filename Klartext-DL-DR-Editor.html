@@ -11,7 +11,7 @@
     --line:#ccd4dc; --line2:#bcc6cf; --line-h:#9fadb8;
     --txt:#1b242c; --muted:#566470; --faint:#8a97a2;
     --blue:#1d5fd6; --blue-dim:#d3e3ff;
-    --green:#2c7a39; --cyan:#0e7d91; --amber:#b06f12; --amber-dim:#e6d3a8; --red:#c0392b;
+    --green:#2c7a39; --cyan:#0e7d91; --amber:#b06f12; --amber-dim:#e6d3a8; --red:#c0392b; --red-dim:#f8d9d4;
     --header1:#f3f6f9; --header2:#e7ecf1;
     --accent-bg:#d8e7ff; --accent-fg:#15407f; --accent-bg-h:#c4d9fb;
     --badge-bg:#fbf2da;
@@ -27,7 +27,7 @@
     --line:#2f3b45; --line2:#3a4a56; --line-h:#46596a;
     --txt:#cdd7df; --muted:#7f8d99; --faint:#5a6772;
     --blue:#3f7bf0; --blue-dim:#1d3a78;
-    --green:#7cc063; --cyan:#4cc2d4; --amber:#e2a93f; --amber-dim:#4a3a16; --red:#d96b63;
+    --green:#7cc063; --cyan:#4cc2d4; --amber:#e2a93f; --amber-dim:#4a3a16; --red:#d96b63; --red-dim:#3d1f1c;
     --header1:#1d242b; --header2:#171d22;
     --accent-bg:#1b2d52; --accent-fg:#cfe0ff; --accent-bg-h:#22386a;
     --badge-bg:#22200f;
@@ -135,11 +135,22 @@
   .ref{color:var(--txt)}
   .ref.name{color:var(--green)}
   .fields{display:flex; flex-wrap:wrap; gap:14px; padding:12px}
+  .tabbar{display:flex; gap:3px; padding:8px 12px 0; border-bottom:1px solid var(--line); background:var(--panel2)}
+  .tabbar .tab{
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.04em; padding:5px 11px;
+    border:1px solid var(--line2); border-bottom:none; border-radius:5px 5px 0 0;
+    background:var(--raised); color:var(--muted); cursor:pointer; margin-bottom:-1px;
+  }
+  .tabbar .tab:hover{background:var(--raised-h); color:var(--txt)}
+  .tabbar .tab.active{background:var(--panel); color:var(--accent-fg); border-color:var(--line); border-bottom:1px solid var(--panel)}
+  .tabbar .tab.haschange::after{content:"●"; color:var(--red); font-size:7px; margin-left:5px; vertical-align:2px}
+  .tabpanel[hidden]{display:none}
   .field{display:flex; flex-direction:column; gap:5px}
   .field > label{font-size:10px; letter-spacing:.1em; color:var(--muted); text-transform:uppercase}
   .field .help{font-size:9.5px; color:var(--faint); letter-spacing:0; text-transform:none}
   .stepper{display:flex; align-items:stretch; border:1px solid var(--line2); border-radius:5px; overflow:hidden; background:var(--bg)}
   .stepper.set{border-color:var(--amber)}
+  .stepper.changed{border-color:var(--red)}
   .stepper button{
     width:26px; border:none; background:var(--raised); color:var(--txt);
     cursor:pointer; font-family:var(--mono); font-size:14px;
@@ -151,10 +162,11 @@
     border-left:1px solid var(--line2); border-right:1px solid var(--line2);
   }
   .stepper.set input{color:var(--amber)}
+  .stepper.changed input{color:var(--red)}
   .stepper input:focus{outline:none}
   .stepper .unit{display:flex; align-items:center; padding:0 7px; color:var(--faint); font-size:10px}
   .field .was{font-size:10px; color:var(--faint); height:12px}
-  .field .was b{color:var(--amber)}
+  .field .was b{color:var(--red)}
   /* ---- program view (right) ---- */
   #progWrap{flex:1 1 auto; overflow:auto; position:relative; background:var(--prog-bg)}
   #progSpacer{position:relative; width:100%}
@@ -165,8 +177,9 @@
   .pl .src{flex:1 1 auto; overflow:hidden; text-overflow:ellipsis}
   .pl.active{background:var(--blue-dim); box-shadow:inset 3px 0 0 var(--blue)}
   .pl.active .ln{color:var(--sel-ln)}
-  .pl.mod{box-shadow:inset 3px 0 0 var(--amber)}
-  .pl.active.mod{box-shadow:inset 3px 0 0 var(--blue), inset 6px 0 0 var(--amber)}
+  .pl.mod{background:var(--red-dim); box-shadow:inset 3px 0 0 var(--red)}
+  .pl.mod .ln{color:var(--red)}
+  .pl.active.mod{background:var(--blue-dim); box-shadow:inset 3px 0 0 var(--blue), inset 6px 0 0 var(--red)}
   .t-cmt{color:var(--green); opacity:.8}
   .t-struct{color:var(--green); font-weight:600}
   .t-kw{color:var(--cyan)}
@@ -336,6 +349,8 @@
 // ---- block grammar -------------------------------------------------------
 const RE_STRUCT   = /^(\s*)(\d+)\s+\*\s?(.*)$/;            // structure block -> legend entry
 const RE_TOOLCALL = /^(\s*)(\d+)\s+(TOOL CALL)\b(.*)$/;    // tool call block
+const RE_CYCL7    = /^\s*(\d+)\s+CYCL\s+DEF\s+7\.([0-3])\s*(.*)$/;    // datum shift: 7.0 label, 7.1/.2/.3 = IX/IY/IZ
+const RE_CYCL32   = /^\s*(\d+)\s+CYCL\s+DEF\s+32\.([0-2])\s*(.*)$/;   // tolerance: 32.0 label, 32.1 = T, 32.2 = HSC-MODE/TA
 const RE_COMMENT  = /;\s?(.*)$/;                           // trailing ; comment
 // value-only capture (keep keyword + spacing on replace); DR excludes DR2
 const RE_V = { DL:/(\bDL\s*)([+-]?\d+(?:\.\d+)?)/, DR:/(\bDR(?!2)\s*)([+-]?\d+(?:\.\d+)?)/, DR2:/(\bDR2\s*)([+-]?\d+(?:\.\d+)?)/ };
@@ -487,6 +502,7 @@ function parse(text){
   original = lines.slice();
   buildGroups();
   computeNearStruct();
+  computeCyclData();
   buildMotionCache();
 }
 
@@ -667,13 +683,203 @@ function computeNearStruct(){
   });
 }
 
+// Scans forward from EVERY tool-call line (a header or a bare re-call like a plain
+// "TOOL CALL DL+0. DR+0." with no T-number) for CYCL DEF 7.x (datum shift) and
+// CYCL DEF 32.x (tolerance) blocks. These usually sit right after the call (and a
+// PLANE block) before the first motion line, but a long program can re-issue them
+// again at a later re-call when the datum/tolerance changes mid-program — so each
+// call line gets its own independent scan rather than only the group's first one.
+// Only the first occurrence of each sub-block per call is kept; whichever sub-lines
+// are actually present become editable, the rest are simply omitted.
+const CYCL_SCAN_WINDOW = 40;
+let cyclByLine = {};   // TOOL CALL line index -> { nullpunktLine, ix, iy, iz, tolLine, t, hscLine } | not present if nothing found
+function computeCyclData(){
+  cyclByLine = {};
+  for(let ci = 0; ci < callLines.length; ci++){
+    const headerIdx = callLines[ci];
+    const nextCall = ci + 1 < callLines.length ? callLines[ci + 1] : lines.length;
+    const scanEnd = Math.min(nextCall, headerIdx + 1 + CYCL_SCAN_WINDOW, lines.length);
+    const cycl = { nullpunktLine:null, ix:null, iy:null, iz:null, tolLine:null, t:null, hscLine:null };
+    for(let i = headerIdx + 1; i < scanEnd; i++){
+      const m7 = lines[i].match(RE_CYCL7);
+      if(m7){
+        const sub = m7[2], rest = m7[3];
+        // CYCL DEF 7 is modal — some posts reset to an absolute datum (X/Y/Z) and then
+        // immediately redefine it incrementally (IX/IY/IZ) right after a PLANE block, in
+        // which case the incremental one is what's actually active when motion starts.
+        // So: only ever match the incremental IX/IY/IZ form (never bare X/Y/Z), and keep
+        // overwriting on every match found — the LAST one in the window wins, not the first.
+        if(sub === "0") cycl.nullpunktLine = i;
+        else if(sub === "1"){ const t = rest.match(/\bIX\s*[+-]?\d+(?:\.\d+)?/); if(t) cycl.ix = { line:i, token:"IX" }; }
+        else if(sub === "2"){ const t = rest.match(/\bIY\s*[+-]?\d+(?:\.\d+)?/); if(t) cycl.iy = { line:i, token:"IY" }; }
+        else if(sub === "3"){ const t = rest.match(/\bIZ\s*[+-]?\d+(?:\.\d+)?/); if(t) cycl.iz = { line:i, token:"IZ" }; }
+        continue;
+      }
+      const m32 = lines[i].match(RE_CYCL32);
+      if(m32){
+        const sub = m32[2];
+        if(sub === "0") cycl.tolLine = i;
+        else if(sub === "1") cycl.t = { line:i };
+        else if(sub === "2") cycl.hscLine = i;
+        continue;
+      }
+    }
+    const found = cycl.nullpunktLine !== null || cycl.ix || cycl.iy || cycl.iz || cycl.tolLine !== null || cycl.t || cycl.hscLine !== null;
+    if(found) cyclByLine[headerIdx] = cycl;
+  }
+}
+
+// ---- CYCL DEF 7 / 32 value access — each lives on its own line (unlike DL/DR/DR2,
+// which all share the TOOL CALL line), so these read/write a specific line + token
+// directly rather than going through parseCall/setField. Read helpers take the raw
+// line text (not an index) so the same logic works against `lines` (current) or
+// `original` (for the "was" diff) without duplicating each one.
+function axisValFromLine(text, token){ const m = text.match(new RegExp("\\b" + token + "\\s*([+-]?\\d+(?:\\.\\d+)?)")); return m ? m[1] : null; }
+function tValFromLine(text){ const m = text.match(/\bT\s*([+-]?\d+(?:\.\d+)?)/); return m ? m[1] : null; }
+function taValFromLine(text){ const m = text.match(/\bTA\s*([+-]?\d+(?:\.\d+)?)/); return m ? m[1] : null; }
+function hscValFromLine(text){ const m = text.match(/\bHSC-MODE\s*:\s*(\d+)/); return m ? m[1] : null; }
+function cyclAxisSet(entry, value){
+  if(!entry || value === "" || value == null || !isFinite(Number(value))) return;
+  lines[entry.line] = lines[entry.line].replace(
+    new RegExp("(\\b" + entry.token + "\\s*)([+-]?\\d+(?:\\.\\d+)?)"), "$1" + fmt(value));
+}
+function cyclTSet(entry, value){
+  if(!entry || value === "" || value == null || !isFinite(Number(value))) return;
+  lines[entry.line] = lines[entry.line].replace(/(\bT\s*)([+-]?\d+(?:\.\d+)?)/, "$1" + fmt(value));
+}
+function cyclTaSet(hscLine, value){
+  if(hscLine == null || value === "" || value == null || !isFinite(Number(value))) return;
+  lines[hscLine] = lines[hscLine].replace(/(\bTA\s*)([+-]?\d+(?:\.\d+)?)/, "$1" + fmt(value));
+}
+function cyclHscSet(hscLine, value){
+  if(hscLine == null || value === "" || value == null) return;
+  const v = Math.max(0, Math.min(1, Math.round(Number(value)) || 0));
+  lines[hscLine] = lines[hscLine].replace(/(\bHSC-MODE\s*:\s*)(\d+)/, "$1" + v);
+}
+
+// ---- CYCL DEF 7 / 32 cards — same stepper UI as DL/DR/DR2, but each field reads
+// and writes a different line, so these build their own field descriptors instead
+// of going through fieldHTML/wireCard/refreshCard.
+function cyclFieldHTML(f){
+  const cur = f.get();
+  const set = cur !== null;
+  const step = f.step || 0.01;
+  return ''
+    + '<div class="field">'
+    +   '<label>' + f.label + ' <span class="help">' + f.help + '</span></label>'
+    +   '<div class="stepper' + (set ? ' set' : '') + '" data-key="' + f.key + '">'
+    +     '<button data-step="' + (-step) + '" title="−' + step + '">−</button>'
+    +     '<input type="text" inputmode="decimal" value="' + (set ? cur : "") + '" placeholder="—">'
+    +     '<button data-step="' + step + '" title="+' + step + '">+</button>'
+    +     '<span class="unit">' + (f.unit || "") + '</span>'
+    +   '</div>'
+    +   '<div class="was"></div>'
+    + '</div>';
+}
+function cyclDatumFields(c){
+  const fields = [];
+  if(c.ix) fields.push({ key:"ix", label:"IX", help:"X datum shift", unit:"mm",
+    get:()=>axisValFromLine(lines[c.ix.line], c.ix.token), getOrig:()=>axisValFromLine(original[c.ix.line], c.ix.token), set:v=>cyclAxisSet(c.ix,v), lineIdx:c.ix.line });
+  if(c.iy) fields.push({ key:"iy", label:"IY", help:"Y datum shift", unit:"mm",
+    get:()=>axisValFromLine(lines[c.iy.line], c.iy.token), getOrig:()=>axisValFromLine(original[c.iy.line], c.iy.token), set:v=>cyclAxisSet(c.iy,v), lineIdx:c.iy.line });
+  if(c.iz) fields.push({ key:"iz", label:"IZ", help:"Z datum shift", unit:"mm",
+    get:()=>axisValFromLine(lines[c.iz.line], c.iz.token), getOrig:()=>axisValFromLine(original[c.iz.line], c.iz.token), set:v=>cyclAxisSet(c.iz,v), lineIdx:c.iz.line });
+  return fields;
+}
+function cyclTolFields(c){
+  const fields = [];
+  if(c.t) fields.push({ key:"t", label:"T", help:"path tolerance", unit:"mm",
+    get:()=>tValFromLine(lines[c.t.line]), getOrig:()=>tValFromLine(original[c.t.line]), set:v=>cyclTSet(c.t,v), lineIdx:c.t.line });
+  if(c.hscLine != null){
+    fields.push({ key:"ta", label:"TA", help:"rotary-axis angle tolerance", unit:"°",
+      get:()=>taValFromLine(lines[c.hscLine]), getOrig:()=>taValFromLine(original[c.hscLine]), set:v=>cyclTaSet(c.hscLine,v), lineIdx:c.hscLine });
+    fields.push({ key:"hsc", label:"HSC-MODE", help:"0 off · 1 on", unit:"", step:1,
+      get:()=>hscValFromLine(lines[c.hscLine]), getOrig:()=>hscValFromLine(original[c.hscLine]), set:v=>cyclHscSet(c.hscLine,v), lineIdx:c.hscLine });
+  }
+  return fields;
+}
+// A sub-section stacked inside the TOOL CALL card — a thin divider + small label row
+// instead of a full card-head, so it reads as "part of this tool call" rather than a
+// separate thing. Field keys (ix/iy/iz/t/ta/hsc) are kept out of the .tcfields wrapper
+// so the TOOL CALL's own DL/DR/DR2 wiring never picks these steppers up.
+// Tab bar wiring shared by every card that has more than one tab (DL/DR is always
+// present; CYCL DEF 7/32 are added only when found for this specific call line).
+function wireTabs(card){
+  card.querySelectorAll(".tabbar .tab").forEach(btn => {
+    btn.onclick = () => {
+      const key = btn.dataset.tab;
+      card.querySelectorAll(".tabbar .tab").forEach(b => b.classList.toggle("active", b === btn));
+      card.querySelectorAll(".tabpanel").forEach(p => { p.hidden = (p.dataset.tab !== key); });
+    };
+  });
+}
+// A small red dot on a tab button when something inside it has been edited — otherwise
+// switching to DL/DR would hide the fact that the CYCL DEF tab (or vice versa) was changed.
+const CYCL_DATUM_KEYS = ["ix","iy","iz"], CYCL_TOL_KEYS = ["t","ta","hsc"];
+function updateTabDots(card, idx, cyclFields){
+  const dldrBtn = card.querySelector('.tab[data-tab="dldr"]');
+  if(dldrBtn) dldrBtn.classList.toggle("haschange", lines[idx] !== original[idx]);
+  const datumChanged = (cyclFields||[]).some(f => CYCL_DATUM_KEYS.includes(f.key) && lines[f.lineIdx] !== original[f.lineIdx]);
+  const tolChanged = (cyclFields||[]).some(f => CYCL_TOL_KEYS.includes(f.key) && lines[f.lineIdx] !== original[f.lineIdx]);
+  const b7 = card.querySelector('.tab[data-tab="cycl7"]');
+  if(b7) b7.classList.toggle("haschange", datumChanged);
+  const b32 = card.querySelector('.tab[data-tab="cycl32"]');
+  if(b32) b32.classList.toggle("haschange", tolChanged);
+}
+function wireCyclCard(card, fields){
+  fields.forEach(f => {
+    const st = card.querySelector('.stepper[data-key="' + f.key + '"]');
+    const input = st.querySelector("input");
+    st.querySelectorAll("button").forEach(b => {
+      b.onclick = () => {
+        const step = parseFloat(b.dataset.step);
+        const base = input.value.trim() === "" ? 0 : (parseFloat(input.value) || 0);
+        const next = f.step === 1 ? Math.max(0, Math.min(1, Math.round(base + step))) : (Math.round((base + step) * 1000) / 1000);
+        commitCycl(card, fields, f, next.toString());
+      };
+    });
+    input.addEventListener("change", () => commitCycl(card, fields, f, input.value.trim()));
+    input.addEventListener("keydown", e => { if(e.key === "Enter") input.blur(); });
+  });
+}
+function commitCycl(card, fields, f, value){
+  if(value !== "" && !isFinite(Number(value))) return;     // ignore junk, keep prior value
+  f.set(value);
+  refreshCyclCard(card, fields);
+  updateTabDots(card, Number(card.dataset.idx), fields);
+  renderLegend();
+  drawProgram();
+  updateChrome();
+}
+function cyclAnyModified(fields){ return fields.some(f => lines[f.lineIdx] !== original[f.lineIdx]); }
+function refreshCyclCard(card, fields){
+  fields.forEach(f => {
+    const st = card.querySelector('.stepper[data-key="' + f.key + '"]');
+    const input = st.querySelector("input");
+    const cur = f.get();
+    const set = cur !== null;
+    if(document.activeElement !== input) input.value = set ? cur : "";
+    st.classList.toggle("set", set);
+    const was = st.parentElement.querySelector(".was");
+    const ov = f.getOrig(), nv = cur;
+    st.classList.toggle("changed", ov !== nv);
+    was.innerHTML = (ov !== nv) ? ("was " + (ov===null?"—":ov) + " → <b>" + (nv===null?"—":nv) + "</b>") : "";
+  });
+  const idx = Number(card.dataset.idx);
+  card.classList.toggle("modified", lines[idx] !== original[idx] || cyclAnyModified(fields));
+}
+
 // ---- left : structure legend --------------------------------------------
 const legendEl = document.getElementById("legend");
 const filterEl = document.getElementById("filterInput");
 
 function sectionEdits(grp){
   let n = 0;
-  for(const idx of grp.calls) if(lines[idx] !== original[idx]) n++;
+  for(const idx of grp.calls){
+    if(lines[idx] !== original[idx]) n++;
+    const cycl = cyclByLine[idx];
+    if(cycl) n += cyclDatumFields(cycl).concat(cyclTolFields(cycl)).filter(f => lines[f.lineIdx] !== original[f.lineIdx]).length;
+  }
   return n;
 }
 function renderLegend(){
@@ -731,7 +937,10 @@ function selectSection(id){
   grp.calls.forEach(idx => editorEl.appendChild(buildCard(idx)));
 }
 
-// Build one fully-wired card: identity + nearby structure line + DL/DR/DR2 fields. No raw NC text.
+// Build one fully-wired card: identity + nearby structure line + DL/DR/DR2 fields, plus —
+// whenever a CYCL DEF 7 (datum shift) / CYCL DEF 32 (tolerance) block is found right after
+// THIS specific call (header or re-call) — extra tabs to switch to instead of stacking
+// everything underneath. DL/DR is always the default tab. No raw NC text shown anywhere.
 function buildCard(idx){
   const c = parseCall(lines[idx]);
   const recall = c.recall;
@@ -744,33 +953,52 @@ function buildCard(idx){
     : '<span class="chip cool-none">dry</span>';
   const nl = nearStruct[idx];
   const nearHTML = nl ? '<span class="near-line" title="structure line immediately above this call">* - ' + esc(nl) + '</span>' : "";
-  const fields =
-      '<div class="fields">'
+
+  const dldrHTML =
+      '<div class="fields tcfields">'
     +   fieldHTML(idx,"DL","DL","length oversize")
     +   fieldHTML(idx,"DR","DR","radius oversize")
     +   fieldHTML(idx,"DR2","DR2","corner-radius")
     + '</div>';
+  const tabs = [{ key:"dldr", label:"DL / DR", html:dldrHTML }];
+
+  const cycl = cyclByLine[idx];
+  const datumFields = cycl ? cyclDatumFields(cycl) : [];
+  const tolFields = cycl ? cyclTolFields(cycl) : [];
+  if(datumFields.length) tabs.push({ key:"cycl7", label:"CYCL DEF 7", html:'<div class="fields">' + datumFields.map(cyclFieldHTML).join("") + '</div>' });
+  if(tolFields.length)   tabs.push({ key:"cycl32", label:"CYCL DEF 32", html:'<div class="fields">' + tolFields.map(cyclFieldHTML).join("") + '</div>' });
+  const cyclFields = datumFields.concat(tolFields);
+
+  const tabsHTML = tabs.length > 1
+    ? '<div class="tabbar">' + tabs.map((t,i) => '<button class="tab' + (i===0?' active':'') + '" data-tab="' + t.key + '">' + t.label + '</button>').join("") + '</div>'
+    : "";
+  const panelsHTML = tabs.map((t,i) => '<div class="tabpanel" data-tab="' + t.key + '"' + (i===0?'':' hidden') + '>' + t.html + '</div>').join("");
+
   if(recall){
     card.innerHTML =
       '<div class="card-head">'
       +  '<span class="kw">TOOL CALL</span> <span class="recall-tag">↳ re-call</span>'
       +  nearHTML + coolHTML
-      + '</div>' + fields;
+      + '</div>' + tabsHTML + panelsHTML;
   } else {
     const refName = isQuoted(c.ref);
     card.innerHTML =
       '<div class="card-head">'
       +  '<span class="kw">TOOL CALL</span> <span class="ref' + (refName?' name':'') + '"></span>'
       +  nearHTML + coolHTML
-      + '</div>' + fields;
+      + '</div>' + tabsHTML + panelsHTML;
     card.querySelector(".ref").textContent = c.ref || "?";
   }
   wireCard(card, idx);
   refreshCard(card, idx);
+  if(tabs.length > 1) wireTabs(card);
+  if(cyclFields.length){ wireCyclCard(card, cyclFields); refreshCyclCard(card, cyclFields); }
+  card.cyclFields = cyclFields;   // so commit() (DL/DR/DR2) can fold CYCL edits into the same "modified" state
+  if(tabs.length > 1) updateTabDots(card, idx, cyclFields);
   return card;
 }
 function wireCard(card, idx){
-  card.querySelectorAll(".stepper").forEach(st => {
+  card.querySelectorAll(".tcfields .stepper").forEach(st => {
     const key = st.dataset.key;
     const input = st.querySelector("input");
     st.querySelectorAll("button").forEach(b => {
@@ -794,8 +1022,9 @@ function wireCard(card, idx){
 function commit(card, idx, key, value){
   if(value !== "" && !isFinite(Number(value))) return;     // ignore junk, keep prior value
   setField(idx, key, value);
-  card.classList.toggle("modified", lines[idx] !== original[idx]);
+  card.classList.toggle("modified", lines[idx] !== original[idx] || (card.cyclFields ? cyclAnyModified(card.cyclFields) : false));
   refreshCard(card, idx);
+  updateTabDots(card, idx, card.cyclFields);
   renderLegend();
   drawProgram();
   updateChrome();
@@ -811,6 +1040,7 @@ function refreshCard(card, idx){
     st.classList.toggle("set", set);
     const was = st.parentElement.querySelector(".was");
     const ov = o[key], nv = c[key];
+    st.classList.toggle("changed", ov !== nv);
     was.innerHTML = (ov !== nv) ? ('was ' + (ov===null?"—":ov) + ' → <b>' + (nv===null?"—":nv) + '</b>') : "";
   });
 }
@@ -1331,6 +1561,7 @@ nameWinEl.addEventListener("input", () => {
   NAME_WINDOW = isFinite(n) && n >= 0 ? Math.min(30, n) : 5;
   buildGroups();        // legend titles depend on NAME_WINDOW too — rebuild them
   computeNearStruct();  // per-card name tags
+  computeCyclData();    // CYCL DEF 7/32 cards are scanned per group too
   renderLegend();
   reRenderActive();
 });
