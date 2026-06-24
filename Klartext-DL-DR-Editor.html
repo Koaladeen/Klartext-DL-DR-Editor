@@ -369,6 +369,16 @@ const RE_CYCL7    = /^\s*(\d+)\s+CYCL\s+DEF\s+7\.([0-3])\s*(.*)$/;    // datum s
 const RE_CYCL32   = /^\s*(\d+)\s+CYCL\s+DEF\s+32\.([0-2])\s*(.*)$/;   // tolerance: 32.0 label, 32.1 = T, 32.2 = HSC-MODE/TA
 const RE_CYCL247  = /^\s*(\d+)\s+CYCL\s+DEF\s+247\b/;   // "set datum/preset" cycle — the BEZUGSPUNKT-NUMMER (Q339) is on the following ~-continuation line
 const RE_Q339     = /\bQ339\s*=\s*([+-]?\d+(?:\.\d+)?)/;
+// Generic "CYCL DEF <n> <NAME>~" header, for any canned cycle that uses the Heidenhain
+// Q-parameter continuation block style (drilling, tapping, milling cycles, etc). Requires
+// whitespace right after the cycle number, which is what keeps it from matching "CYCL DEF
+// 7.0"/"32.1" (decimal sub-blocks, handled separately above) — those have a "." right after
+// the number, never whitespace.
+const RE_CYCL_GENERIC_HEAD = /^\s*\d+\s+CYCL\s+DEF\s+(\d+)\s+([^~]*)~?\s*$/;
+// A "   Qnnn=value ;comment~" continuation line — no leading line number of its own. The
+// trailing "." Heidenhain always writes on whole numbers (e.g. "+1.") has no digits after
+// it, so the numeric part is deliberately lenient (\.?\d* not \.\d+) to still match it.
+const RE_CYCL_QLINE = /^\s+Q(\d+)\s*=\s*([+-]?\d+\.?\d*)\s*(?:;\s*([^~]*))?~?\s*$/;
 const RE_COMMENT  = /;\s?(.*)$/;                           // trailing ; comment
 // value-only capture (keep keyword + spacing on replace); DR excludes DR2
 const RE_V = { DL:/(\bDL\s*)([+-]?\d+(?:\.\d+)?)/, DR:/(\bDR(?!2)\s*)([+-]?\d+(?:\.\d+)?)/, DR2:/(\bDR2\s*)([+-]?\d+(?:\.\d+)?)/ };
@@ -546,14 +556,58 @@ function rotZ(a){ const c=Math.cos(a), s=Math.sin(a); return [[c,-s,0],[s,c,0],[
 function applyMat(R, x, y, z){
   return [ R[0][0]*x+R[0][1]*y+R[0][2]*z, R[1][0]*x+R[1][1]*y+R[1][2]*z, R[2][0]*x+R[2][1]*y+R[2][2]*z ];
 }
+const RE_CYCL_DEF_NUM = /^\s*\d+\s+CYCL\s+DEF\s+(\d+)\b/;          // any CYCL DEF header — just to track which canned cycle is modally active
+const RE_CYCL_CALL    = /^\s*\d+\s+CYCL\s+CALL\b(?!\s+PAT)/;        // bare "CYCL CALL" (not "CYCL CALL PAT", which needs a point table this editor doesn't parse)
+// Standard Heidenhain canned-cycle numbers for drilling-family vs tapping/thread-cutting —
+// covers the common ones (TNC 640 cycle set); anything else just leaves the previous
+// modal cycle in place rather than guessing, so an unrecognized cycle won't misclassify
+// the holes that follow it.
+const DRILL_CYCLE_NUMS = new Set([200,201,202,203,204,205,220,221,240,241]);
+const TAP_CYCLE_NUMS   = new Set([206,207,208,209,262,263,264,265,267]);
 let posAfter = [];
 let motion = [];
+let drillMarkers = [];   // { line, x,y,z (trigger point, world), kind:"drill"|"tap", bottom:[x,y,z] world | undefined }
+// Builds one drill/tap marker. The trigger point (x,y,z, local) is where the cycle actually
+// fires; if the cycle told us its depth (Q201) we also work out where the hole bottoms
+// out — relative to the reference surface (Q203) when given, otherwise relative to the
+// trigger height itself — so the 3D view can draw the hole at its real depth instead of
+// just a flat dot.
+function makeDrillMarker(line, x, y, z, planeR, cycle){
+  const marker = { line, kind:cycle.kind, num:cycle.num, R:planeR, lx:x, ly:y, lzTop:z };
+  const [wx, wy, wz] = applyMat(planeR, x, y, z);
+  marker.x = wx; marker.y = wy; marker.z = wz;   // world trigger point — the ring, and the bounding-sphere fit
+  if(cycle.q201 != null){
+    const surfaceZ = cycle.q203 != null ? cycle.q203 : z;
+    marker.lzBottom = surfaceZ + cycle.q201;   // Q201 (TIEFE) is negative, so this goes downward
+    marker.bottom = applyMat(planeR, x, y, marker.lzBottom);   // world bottom point
+  }
+  return marker;
+}
+// A literal small spiral from the trigger point down to the hole bottom — built in local
+// coordinates around the local drilling axis (so it stays a true helix even in a plane
+// tilted by PLANE SPATIAL) and only rotated into world space at the very end, the same
+// pattern segPoints3 uses for arcs. Reads as "this hole is threaded" from any orbit angle,
+// since it's real 3D geometry rather than a flat icon glued to the screen.
+function threadHelixPoints(marker){
+  const top = marker.lzTop, bottom = marker.lzBottom, depth = top - bottom;
+  if(!(depth > 0)) return [];
+  const turns = 5, N = 32;
+  const r = Math.min(1.2, Math.max(0.25, depth * 0.12));
+  const pts = [];
+  for(let k = 0; k <= N; k++){
+    const t = k / N, ang = t * turns * Math.PI * 2;
+    pts.push(applyMat(marker.R, marker.lx + r*Math.cos(ang), marker.ly + r*Math.sin(ang), top - t*depth));
+  }
+  return pts;
+}
 function buildMotionCache(){
   posAfter = new Array(lines.length).fill(null);
   motion = new Array(lines.length).fill(null);
+  drillMarkers = [];
   let x = 0, y = 0, z = 0, ccx = null, ccy = null;
   let modalRapid = false;   // F is modal in Heidenhain — FMAX/F stays in effect until the next one is written
   let planeR = MAT_ID;      // active working-plane rotation from the last PLANE SPATIAL (identity = untilted)
+  let activeDrillCycle = null;   // modally-active drilling/tapping cycle, { num, kind } — set by a recognized CYCL DEF, fires at the next M99 or bare CYCL CALL
   for(let i = 0; i < lines.length; i++){
     const line = lines[i];
     const codeOnly = line.split(";")[0];
@@ -572,6 +626,31 @@ function buildMotionCache(){
       planeR = matMul(matMul(rotX(spa*Math.PI/180), rotY(spb*Math.PI/180)), rotZ(spc*Math.PI/180));
       posAfter[i] = { x, y, z }; continue;
     }
+    const mCyclDefNum = line.match(RE_CYCL_DEF_NUM);
+    if(mCyclDefNum){
+      const num = Number(mCyclDefNum[1]);
+      if(DRILL_CYCLE_NUMS.has(num) || TAP_CYCLE_NUMS.has(num)){
+        // peek the upcoming Q-parameter continuation lines for depth/surface/clearance —
+        // this is what lets the 3D view draw the hole at its actual depth instead of just
+        // a flat dot at the trigger point
+        const q = {};
+        for(let j = i + 1; j < lines.length; j++){
+          const mq = lines[j].match(RE_CYCL_QLINE);
+          if(!mq) break;
+          q[mq[1]] = parseFloat(mq[2]);
+        }
+        activeDrillCycle = {
+          num, kind: DRILL_CYCLE_NUMS.has(num) ? "drill" : "tap",
+          q200: q["200"], q201: q["201"], q203: q["203"]   // safety clearance, depth, reference-surface Z
+        };
+      }
+      posAfter[i] = { x, y, z }; continue;
+    }
+    const mCyclCall = line.match(RE_CYCL_CALL);
+    if(mCyclCall){
+      if(activeDrillCycle) drillMarkers.push(makeDrillMarker(i, x, y, z, planeR, activeDrillCycle));
+      posAfter[i] = { x, y, z }; continue;
+    }
     const mCC = line.match(RE_MOVE_CC);
     if(mCC){
       const gx = axisVal(mCC[1], "X"), gy = axisVal(mCC[1], "Y");
@@ -588,6 +667,8 @@ function buildMotionCache(){
       if(gz !== null) z = gz;
       posAfter[i] = { x, y, z };
       motion[i] = { kind:"line", rapid:modalRapid, R:planeR };
+      // a positioning move with M99 fires the modally-active cycle once, right here
+      if(activeDrillCycle && /\bM99\b/.test(line)) drillMarkers.push(makeDrillMarker(i, x, y, z, planeR, activeDrillCycle));
       continue;
     }
     const mC = line.match(RE_MOVE_C);
@@ -718,7 +799,7 @@ function computeCyclData(){
     const headerIdx = callLines[ci];
     const nextCall = ci + 1 < callLines.length ? callLines[ci + 1] : lines.length;
     const scanEnd = Math.min(nextCall, headerIdx + 1 + CYCL_SCAN_WINDOW, lines.length);
-    const cycl = { nullpunktLine:null, ix:null, iy:null, iz:null, tolLine:null, t:null, hscLine:null };
+    const cycl = { nullpunktLine:null, ix:null, iy:null, iz:null, tolLine:null, t:null, hscLine:null, others:[] };
     for(let i = headerIdx + 1; i < scanEnd; i++){
       const m7 = lines[i].match(RE_CYCL7);
       if(m7){
@@ -742,8 +823,29 @@ function computeCyclData(){
         else if(sub === "2") cycl.hscLine = i;
         continue;
       }
+      // Any other "CYCL DEF <n> <NAME>~" block (drilling, tapping, milling, ...) using the
+      // Q-parameter continuation style — 247 is excluded since it's handled separately as a
+      // legend datum-point entry rather than a tab. The inline German comment on each Qnnn
+      // line (e.g. ";TIEFE") becomes the field's label, so this needs no per-cycle lookup
+      // table to know what each parameter means.
+      const mGeneric = lines[i].match(RE_CYCL_GENERIC_HEAD);
+      if(mGeneric){
+        const cycleNum = mGeneric[1];
+        const name = mGeneric[2].trim();
+        const qFields = [];
+        let j = i + 1;
+        while(j < lines.length){
+          const mq = lines[j].match(RE_CYCL_QLINE);
+          if(!mq) break;
+          qFields.push({ q:mq[1], lineIdx:j, comment:(mq[3] || "").trim() });
+          j++;
+        }
+        if(qFields.length && cycleNum !== "247") cycl.others.push({ headerLine:i, cycleNum, name, qFields });
+        i = j - 1;
+        continue;
+      }
     }
-    const found = cycl.nullpunktLine !== null || cycl.ix || cycl.iy || cycl.iz || cycl.tolLine !== null || cycl.t || cycl.hscLine !== null;
+    const found = cycl.nullpunktLine !== null || cycl.ix || cycl.iy || cycl.iz || cycl.tolLine !== null || cycl.t || cycl.hscLine !== null || cycl.others.length;
     if(found) cyclByLine[headerIdx] = cycl;
   }
 }
@@ -831,6 +933,35 @@ function cyclTolFields(c){
   }
   return fields;
 }
+// ---- generic Q-parameter cycles (drilling, tapping, milling, ...) — unlike CYCL DEF 7/32,
+// these have no fixed parameter list, so the field label/help comes straight from each
+// Qnnn line's own inline comment (";TIEFE" etc) rather than a hardcoded lookup table.
+function qValFromLine(text){ const m = text.match(/\bQ\d+\s*=\s*([+-]?\d+\.?\d*)/); return m ? m[1] : null; }
+function qSetOnLine(lineIdx, value){
+  if(value === "" || value == null || !isFinite(Number(value))) return;
+  lines[lineIdx] = lines[lineIdx].replace(/(\bQ\d+\s*=\s*)([+-]?\d+\.?\d*)/, "$1" + fmt(value));
+}
+// Heidenhain's own naming convention gives a rough hint at sensible units/step sizes —
+// not exhaustive, just enough that feed and dwell-time fields don't share a 0.01mm stepper.
+function qGuess(comment){
+  const c = (comment || "").toUpperCase();
+  if(c.includes("VORSCHUB") || c.includes("FEED")) return { unit:"mm/min", step:10 };
+  if(c.includes("ZEIT") || c.includes("TIME")) return { unit:"s", step:0.1 };
+  if(c.includes("WINKEL") || c.includes("ANGLE")) return { unit:"°", step:1 };
+  if(c.includes("STEIGUNG") || c.includes("PITCH")) return { unit:"mm", step:0.05 };
+  return { unit:"mm", step:0.01 };
+}
+function cyclOtherFields(block){
+  return block.qFields.map(qf => {
+    const guess = qGuess(qf.comment);
+    return {
+      key:"cyc" + block.headerLine + "_q" + qf.q,
+      label:"Q" + qf.q, help:qf.comment || ("Q" + qf.q), unit:guess.unit, step:guess.step,
+      get:()=>qValFromLine(lines[qf.lineIdx]), getOrig:()=>qValFromLine(original[qf.lineIdx]),
+      set:v=>qSetOnLine(qf.lineIdx, v), lineIdx:qf.lineIdx
+    };
+  });
+}
 // A sub-section stacked inside the TOOL CALL card — a thin divider + small label row
 // instead of a full card-head, so it reads as "part of this tool call" rather than a
 // separate thing. Field keys (ix/iy/iz/t/ta/hsc) are kept out of the .tcfields wrapper
@@ -846,18 +977,15 @@ function wireTabs(card){
     };
   });
 }
-// A small red dot on a tab button when something inside it has been edited — otherwise
-// switching to DL/DR would hide the fact that the CYCL DEF tab (or vice versa) was changed.
-const CYCL_DATUM_KEYS = ["ix","iy","iz"], CYCL_TOL_KEYS = ["t","ta","hsc"];
-function updateTabDots(card, idx, cyclFields){
-  const dldrBtn = card.querySelector('.tab[data-tab="dldr"]');
-  if(dldrBtn) dldrBtn.classList.toggle("haschange", lines[idx] !== original[idx]);
-  const datumChanged = (cyclFields||[]).some(f => CYCL_DATUM_KEYS.includes(f.key) && lines[f.lineIdx] !== original[f.lineIdx]);
-  const tolChanged = (cyclFields||[]).some(f => CYCL_TOL_KEYS.includes(f.key) && lines[f.lineIdx] !== original[f.lineIdx]);
-  const b7 = card.querySelector('.tab[data-tab="cycl7"]');
-  if(b7) b7.classList.toggle("haschange", datumChanged);
-  const b32 = card.querySelector('.tab[data-tab="cycl32"]');
-  if(b32) b32.classList.toggle("haschange", tolChanged);
+// A small red dot on a tab button when something inside it has been edited — checks each
+// panel's own steppers for the .changed state (already set by refreshCard/refreshCyclCard)
+// rather than keeping a hardcoded list of field keys per tab, so it works for any tab
+// including the dynamically-numbered drilling/tapping/etc cycle ones.
+function updateTabDots(card){
+  card.querySelectorAll(".tabbar .tab").forEach(btn => {
+    const panel = card.querySelector('.tabpanel[data-tab="' + btn.dataset.tab + '"]');
+    btn.classList.toggle("haschange", panel ? !!panel.querySelector(".stepper.changed") : false);
+  });
 }
 function wireCyclCard(card, fields){
   fields.forEach(f => {
@@ -879,7 +1007,7 @@ function commitCycl(card, fields, f, value){
   if(value !== "" && !isFinite(Number(value))) return;     // ignore junk, keep prior value
   f.set(value);
   refreshCyclCard(card, fields);
-  updateTabDots(card, Number(card.dataset.idx), fields);
+  updateTabDots(card);
   renderLegend();
   drawProgram();
   updateChrome();
@@ -912,7 +1040,10 @@ function sectionEdits(grp){
   for(const idx of grp.calls){
     if(lines[idx] !== original[idx]) n++;
     const cycl = cyclByLine[idx];
-    if(cycl) n += cyclDatumFields(cycl).concat(cyclTolFields(cycl)).filter(f => lines[f.lineIdx] !== original[f.lineIdx]).length;
+    if(cycl){
+      const allCyclFields = cyclDatumFields(cycl).concat(cyclTolFields(cycl)).concat(cycl.others.flatMap(b => cyclOtherFields(b)));
+      n += allCyclFields.filter(f => lines[f.lineIdx] !== original[f.lineIdx]).length;
+    }
   }
   return n;
 }
@@ -976,9 +1107,9 @@ function fieldHTML(idx, key, label, help){
     + '<div class="field">'
     +   '<label>' + label + ' <span class="help">' + help + '</span></label>'
     +   '<div class="stepper' + (set ? ' set' : '') + '" data-key="' + key + '">'
-    +     '<button data-step="-0.01" title="−0.01">−</button>'
+    +     '<button data-step="-0.005" title="−0.005">−</button>'
     +     '<input type="text" inputmode="decimal" value="' + (set ? cur : "") + '" placeholder="—">'
-    +     '<button data-step="0.01" title="+0.01">+</button>'
+    +     '<button data-step="0.005" title="+0.005">+</button>'
     +     '<span class="unit">mm</span>'
     +   '</div>'
     +   '<div class="was"></div>'
@@ -1027,7 +1158,13 @@ function buildCard(idx){
   const tolFields = cycl ? cyclTolFields(cycl) : [];
   if(datumFields.length) tabs.push({ key:"cycl7", label:"CYCL DEF 7", html:'<div class="fields">' + datumFields.map(cyclFieldHTML).join("") + '</div>' });
   if(tolFields.length)   tabs.push({ key:"cycl32", label:"CYCL DEF 32", html:'<div class="fields">' + tolFields.map(cyclFieldHTML).join("") + '</div>' });
-  const cyclFields = datumFields.concat(tolFields);
+  // any other Q-parameter cycle (drilling, tapping, milling...) found near this call —
+  // each gets its own tab, named after its cycle number
+  const otherFieldGroups = (cycl ? cycl.others : []).map(block => ({ block, fields:cyclOtherFields(block) }));
+  otherFieldGroups.forEach(({ block, fields }, n) => {
+    tabs.push({ key:"cyclo" + n, label:"CYCL DEF " + block.cycleNum, html:'<div class="fields">' + fields.map(cyclFieldHTML).join("") + '</div>' });
+  });
+  const cyclFields = datumFields.concat(tolFields).concat(otherFieldGroups.flatMap(g => g.fields));
 
   const tabsHTML = tabs.length > 1
     ? '<div class="tabbar">' + tabs.map((t,i) => '<button class="tab' + (i===0?' active':'') + '" data-tab="' + t.key + '">' + t.label + '</button>').join("") + '</div>'
@@ -1054,7 +1191,7 @@ function buildCard(idx){
   if(tabs.length > 1) wireTabs(card);
   if(cyclFields.length){ wireCyclCard(card, cyclFields); refreshCyclCard(card, cyclFields); }
   card.cyclFields = cyclFields;   // so commit() (DL/DR/DR2) can fold CYCL edits into the same "modified" state
-  if(tabs.length > 1) updateTabDots(card, idx, cyclFields);
+  if(tabs.length > 1) updateTabDots(card);
   return card;
 }
 function wireCard(card, idx){
@@ -1084,7 +1221,7 @@ function commit(card, idx, key, value){
   setField(idx, key, value);
   card.classList.toggle("modified", lines[idx] !== original[idx] || (card.cyclFields ? cyclAnyModified(card.cyclFields) : false));
   refreshCard(card, idx);
-  updateTabDots(card, idx, card.cyclFields);
+  updateTabDots(card);
   renderLegend();
   drawProgram();
   updateChrome();
@@ -1173,7 +1310,11 @@ function buildPathSegments(idx){
                   x2:to.x, y2:to.y, z2:to.z, cx:m.cx, cy:m.cy, cw:m.cw, R });
     }
   }
-  return trimApproachAndRetract(segs);
+  // Drilling/tapping cycles do their actual Z-plunge inside the canned cycle, invisible as an
+  // explicit L/C/CP move — the only visible trace is the M99/CYCL CALL trigger point, so those
+  // are collected separately as markers rather than path segments.
+  const markers = drillMarkers.filter(dm => dm.line > idx && dm.line <= end);
+  return { segs: trimApproachAndRetract(segs), markers };
 }
 // The raw segment list runs from right after the TOOL CALL to right before the next one, which
 // includes the rapid travel in from wherever the machine happened to be (positioning XY, then a
@@ -1262,10 +1403,10 @@ function drawToolpath(idx){
   lastPathIdx = idx;
   const grp = toolGroups.find(g => g.calls.includes(idx));
   document.getElementById("pathTitle").textContent = "Toolpath — " + (grp ? grp.label : "TOOL CALL");
-  const segs = buildPathSegments(idx);
+  const { segs, markers } = buildPathSegments(idx);
   const body = document.getElementById("pathBody");
   const foot = document.getElementById("pathFoot");
-  if(!segs.length){
+  if(!segs.length && !markers.length){
     body.innerHTML = '<div class="empty">No L/C/CP motion found before the next tool call.</div>';
     foot.innerHTML = "";
     return;
@@ -1279,11 +1420,19 @@ function drawToolpath(idx){
     minZ=Math.min(minZ,z); maxZ=Math.max(maxZ,z);
     cxw+=x; cyw+=y; czw+=z; count++;
   }));
+  markers.forEach(mk => {
+    minZ=Math.min(minZ,mk.z); maxZ=Math.max(maxZ,mk.z); cxw+=mk.x; cyw+=mk.y; czw+=mk.z; count++;
+    if(mk.bottom){ minZ=Math.min(minZ,mk.bottom[2]); maxZ=Math.max(maxZ,mk.bottom[2]); cxw+=mk.bottom[0]; cyw+=mk.bottom[1]; czw+=mk.bottom[2]; count++; }
+  });
   cxw/=count; cyw/=count; czw/=count;
   let radius = 0.001;
   worldPolylines.forEach(pl => pl.pts.forEach(([x,y,z]) => {
     radius = Math.max(radius, Math.hypot(x-cxw, y-cyw, z-czw));
   }));
+  markers.forEach(mk => {
+    radius = Math.max(radius, Math.hypot(mk.x-cxw, mk.y-cyw, mk.z-czw));
+    if(mk.bottom) radius = Math.max(radius, Math.hypot(mk.bottom[0]-cxw, mk.bottom[1]-cyw, mk.bottom[2]-czw));
+  });
   const W = Math.max(120, body.clientWidth || 300), H = Math.max(120, body.clientHeight || 300);
   const pad = 22;
   const scale = ((Math.min(W, H) - pad*2) / (2*radius)) * pathZoom;
@@ -1293,22 +1442,53 @@ function drawToolpath(idx){
   let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
   polylines.forEach(pl => {
     const d = pl.proj.map(([px,py]) => { const [sx,sy] = toSvg(px,py); return sx.toFixed(1) + "," + sy.toFixed(1); }).join(" ");
-    svg += '<polyline points="' + d + '" fill="none" stroke="' + (pl.rapid ? "var(--rapid)" : "var(--cyan)") + '" '
+    svg += '<polyline points="' + d + '" fill="none" stroke="' + (pl.rapid ? "var(--rapid)" : "var(--blue)") + '" '
          + 'stroke-width="' + (pl.rapid ? 1.6 : 2) + '" stroke-linecap="round"/>';
   });
-  const firstPt = polylines[0].proj[0], lastPolyline = polylines[polylines.length-1];
-  const lastPt = lastPolyline.proj[lastPolyline.proj.length-1];
-  const [fx,fy] = toSvg(firstPt[0], firstPt[1]);
-  const [lx,ly] = toSvg(lastPt[0], lastPt[1]);
-  svg += '<circle cx="' + fx.toFixed(1) + '" cy="' + fy.toFixed(1) + '" r="4" fill="var(--green)"/>';
-  svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="4" fill="var(--red)"/>';
+  // drilling: a dashed drop-line down to the actual hole bottom (when Q201/Q203 told us where
+  // that is). Tapping: a real little spiral down that same span instead, so it reads as
+  // "threaded" rather than just "deep" — both end in a small filled dot at the bottom, plus
+  // the open ring at the trigger point that was already there.
+  markers.forEach(mk => {
+    const color = "var(--green)";
+    const [px,py] = project(mk.x, mk.y, mk.z);
+    const [sx,sy] = toSvg(px,py);
+    let bsx, bsy;
+    if(mk.bottom){
+      const [bpx,bpy] = project(mk.bottom[0], mk.bottom[1], mk.bottom[2]);
+      [bsx,bsy] = toSvg(bpx,bpy);
+    }
+    if(mk.kind === "tap" && mk.bottom){
+      const pts = threadHelixPoints(mk);
+      const d = pts.map(([x,y,z]) => { const [ppx,ppy] = project(x,y,z); const [ssx,ssy] = toSvg(ppx,ppy); return ssx.toFixed(1) + "," + ssy.toFixed(1); }).join(" ");
+      svg += '<polyline points="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.3" stroke-linecap="round"/>';
+    } else if(mk.bottom){
+      svg += '<line x1="' + sx.toFixed(1) + '" y1="' + sy.toFixed(1) + '" x2="' + bsx.toFixed(1) + '" y2="' + bsy.toFixed(1)
+           + '" stroke="' + color + '" stroke-width="1.8" stroke-dasharray="2.5,2"/>';
+    }
+    svg += '<circle cx="' + sx.toFixed(1) + '" cy="' + sy.toFixed(1) + '" r="4.5" fill="none" stroke="' + color + '" stroke-width="1.6"/>';
+    if(mk.bottom) svg += '<circle cx="' + bsx.toFixed(1) + '" cy="' + bsy.toFixed(1) + '" r="2.2" fill="' + color + '"/>';
+  });
+  if(polylines.length){
+    const firstPt = polylines[0].proj[0], lastPolyline = polylines[polylines.length-1];
+    const lastPt = lastPolyline.proj[lastPolyline.proj.length-1];
+    const [fx,fy] = toSvg(firstPt[0], firstPt[1]);
+    const [lx,ly] = toSvg(lastPt[0], lastPt[1]);
+    svg += '<circle cx="' + fx.toFixed(1) + '" cy="' + fy.toFixed(1) + '" r="4" fill="var(--green)"/>';
+    svg += '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="4" fill="var(--red)"/>';
+  }
   if(pathViewMode === "3d") svg += drawAxisGizmo(W, H);
   svg += '</svg>';
   body.innerHTML = svg;
   const rapidCount = segs.filter(s => s.rapid).length;
+  const drillCount = markers.filter(m => m.kind === "drill").length;
+  const tapCount = markers.filter(m => m.kind === "tap").length;
   foot.innerHTML =
-      '<span class="legend-line"><span class="swatch" style="background:var(--cyan)"></span>F ('
-    + (segs.length - rapidCount) + ') <span class="swatch" style="background:var(--rapid); margin-left:6px"></span>FMAX (' + rapidCount + ')</span>'
+      '<span class="legend-line"><span class="swatch" style="background:var(--blue)"></span>F ('
+    + (segs.length - rapidCount) + ') <span class="swatch" style="background:var(--rapid); margin-left:6px"></span>FMAX (' + rapidCount + ')'
+    + (drillCount ? ' <span class="swatch" style="background:var(--green); margin-left:6px"></span>drill (' + drillCount + ')' : "")
+    + (tapCount ? ' <span class="swatch" style="background:var(--green); margin-left:6px"></span>tap (' + tapCount + ')' : "")
+    + '</span>'
     + '<span>Z ' + minZ.toFixed(2) + ' → ' + maxZ.toFixed(2) + '</span>';
 }
 function setPathView(mode){
